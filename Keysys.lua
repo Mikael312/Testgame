@@ -1,5 +1,5 @@
 -- =====================================================
--- North Hub | Key System UI
+-- Nightmare Hub | Key System UI
 -- Updated with Key Verification
 -- =====================================================
 
@@ -13,7 +13,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 -- == CONFIGURATION ==
 -- Lootlabs key link
-local KEY_SYSTEM_URL = "https://loot-link.com/s?mMxPMlyg"
+local KEY_SYSTEM_URL = "https://lootdest.org/s?4l4SiXE0"
 
 -- Discord invite link
 local DISCORD_INVITE_URL = "https://discord.gg/8KWNTFrN"
@@ -22,8 +22,8 @@ local DISCORD_INVITE_URL = "https://discord.gg/8KWNTFrN"
 local KEY_CHECK_URL = "https://mikael312.github.io/NorthHub."
 
 -- Key storage filename
-local KEY_STORAGE_FILE = "northhub_key.txt"
-local KEY_TIMESTAMP_FILE = "northhub_timestamp.txt"
+local KEY_STORAGE_FILE = "nightmarehub_key.txt"
+local KEY_TIMESTAMP_FILE = "nightmarehub_timestamp.txt"
 
 -- == VALID KEYS STORAGE ==
 local validKeys = {}
@@ -125,18 +125,21 @@ local function copyToClipboard(text)
     end
 end
 
--- Function to validate key format
+-- Function to validate key format (simple, no checksum)
 local function isValidKeyFormat(key)
-    -- Check if key starts with "North_" and has valid characters
-    if not key:match("^North_%w+$") then
+    -- Check if key starts with "Nightmare_" and has valid characters
+    if not key:match("^Nightmare_%w+$") then
+        print("❌ Invalid format: Must start with Nightmare_")
         return false
     end
     
-    -- Check minimum length (North_ + at least 10 chars)
-    if #key < 16 then
+    -- Check minimum length (Nightmare_ + at least 10 chars)
+    if #key < 20 then
+        print("❌ Invalid format: Key too short")
         return false
     end
     
+    print("✅ Format valid!")
     return true
 end
 
@@ -201,7 +204,7 @@ local function loadMainScript()
     print("✅ Main script loaded successfully!")
     
     -- You can add your actual script here:
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/NorthHub/refs/heads/main/Toh.lua"))()
+    loadstring(game:HttpGet("https://pastefy.app/hpCzavBY/raw"))()
 end
 
 -- Function to run when "Check Key" button is pressed
@@ -294,25 +297,25 @@ mainFrame.Active = true
 mainFrame.Draggable = true
 Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 12)
 
--- Add border to the window
+-- Add border to the window (RED THEME)
 local frameStroke = Instance.new("UIStroke")
-frameStroke.Color = Color3.fromRGB(0, 162, 255)
+frameStroke.Color = Color3.fromRGB(220, 20, 60)
 frameStroke.Thickness = 1.5
 frameStroke.Parent = mainFrame
 
--- Title Bar
+-- Title Bar (RED/BLACK GRADIENT)
 local titleBar = Instance.new("Frame")
 titleBar.Name = "TitleBar"
 titleBar.Parent = mainFrame
-titleBar.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+titleBar.BackgroundColor3 = Color3.fromRGB(15, 5, 5)
 titleBar.BorderSizePixel = 0
 titleBar.Size = UDim2.new(1, 0, 0, 40)
 Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 12)
 
 local titleGradient = Instance.new("UIGradient")
 titleGradient.Color = ColorSequence.new{
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 162, 255)), 
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 50, 200))
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(139, 0, 0)), 
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(50, 0, 0))
 }
 titleGradient.Rotation = 90
 titleGradient.Parent = titleBar
@@ -324,7 +327,7 @@ titleLabel.BackgroundTransparency = 1
 titleLabel.Position = UDim2.new(0, 15, 0, 0)
 titleLabel.Size = UDim2.new(1, -60, 1, 0)
 titleLabel.Font = Enum.Font.GothamBold
-titleLabel.Text = "North Hub | Key System"
+titleLabel.Text = "Nightmare Hub | Key System"
 titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.TextSize = 16
 titleLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -434,9 +437,9 @@ local function createButton(name, text, color, layoutOrder)
     return btn
 end
 
--- Create Buttons
-local getKeyBtn = createButton("GetKeyBtn", "Get Key", Color3.fromRGB(0, 162, 255), 1)
-local checkKeyBtn = createButton("CheckKeyBtn", "Check Key", Color3.fromRGB(50, 200, 100), 2)
+-- Create Buttons (RED THEME)
+local getKeyBtn = createButton("GetKeyBtn", "Get Key", Color3.fromRGB(220, 20, 60), 1)
+local checkKeyBtn = createButton("CheckKeyBtn", "Check Key", Color3.fromRGB(139, 0, 0), 2)
 local discordBtn = createButton("DiscordBtn", "Discord", Color3.fromRGB(88, 101, 242), 3)
 
 -- == BUTTON LOGIC ==
@@ -495,6 +498,6 @@ TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back), {
     Size = UDim2.new(0, 400, 0, 300)
 }):Play()
 
-print("✅ North Hub Key System UI Loaded!")
+print("✅ Nightmare Hub Key System UI Loaded!")
 print("📋 Discord: https://discord.gg/8KWNTFrN")
-print("🔑 Get Key: https://lootdest.org/s?9dhiBiZj")
+print("🔑 Get Key: https://lootdest.org/s?4l4SiXE0")
