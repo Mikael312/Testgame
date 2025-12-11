@@ -107,9 +107,6 @@ local baselockConnection = nil
 local bellSoundPlayed = false
 local currentBellSound = nil
 local BELL_SOUND_ID = "rbxassetid://3302969109"
-
--- Websling Control Variables (NEW)
-local webslingControlEnabled = false
 -- ==================== UI CREATION ====================
 for _, gui in pairs(game.CoreGui:GetChildren()) do
     if gui.Name == "NightmareHubUI" then
@@ -1120,20 +1117,6 @@ local function toggleAllowFriends(state)
             game:GetService("ReplicatedStorage"):WaitForChild("Packages"):WaitForChild("Net"):WaitForChild("RE/PlotService/ToggleFriends"):FireServer()
         end)
         print("❌ Allow Friends: OFF")
-    end
-end
-
--- ==================== WEBLING CONTROL FUNCTION (NEW) ====================
-local function toggleWebslingControl(state)
-    webslingControlEnabled = state
-    
-    if webslingControlEnabled then
-        pcall(function()
-            loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/WebslingControl.lua"))()
-        end)
-        print("✅ Websling Control: ON")
-    else
-        print("❌ Websling Control: OFF")
     end
 end
 
@@ -2830,7 +2813,14 @@ table.insert(tabContent["Main"], createToggleButton("Baselock Reminder", functio
     toggleBaselockReminder(state)
 end))
 table.insert(tabContent["Main"], createToggleButton("Websling Control", function(state)
-    toggleWebslingControl(state)
+    if state then
+        pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/WebslingControl.lua"))()
+        end)
+        print("✅ Websling Control: ON")
+    else
+        print("❌ Websling Control: OFF")
+    end
 end))
 
 -- VISUAL TAB (5 TOGGLES - Renamed Brainrot ESP to Esp Best)
