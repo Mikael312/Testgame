@@ -89,6 +89,9 @@ local isMonitoring = false
 local lastStealCount = 0
 local monitoringLoop = nil
 
+-- Instant Grab Variables (NEW)
+local instantGrabEnabled = false
+local instantGrabThread = nil
 -- ==================== UI CREATION ====================
 for _, gui in pairs(game.CoreGui:GetChildren()) do
     if gui.Name == "NightmareHubUI" then
@@ -961,6 +964,125 @@ local function toggleEspBaseTimer(state)
         end
         
         print("❌ ESP Base Timer: OFF")
+    end
+end
+
+-- ==================== INSTANT GRAB FUNCTION (NEW) ====================
+local function getPromptPosition(prompt)
+    local parent = prompt.Parent
+    
+    if parent:IsA("BasePart") then
+        return parent.Position
+    end
+    
+    if parent:IsA("Model") then
+        local primary = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart")
+        if primary then
+            return primary.Position
+        end
+    end
+    
+    if parent:IsA("Attachment") then
+        return parent.WorldPosition
+    end
+    
+    return nil
+end
+
+local function findNearestPrompt()
+    local character = player.Character
+    if not character then return nil, math.huge end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil, math.huge end
+    
+    local nearest = nil
+    local minDist = math.huge
+    local plots = workspace:FindFirstChild("Plots")
+    
+    if not plots then return nil, math.huge end
+    
+    for _, obj in pairs(plots:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") and obj.Enabled and obj.ActionText == "Steal" then
+            local pos = getPromptPosition(obj)
+            
+            if pos then
+                local dist = (hrp.Position - pos).Magnitude
+                
+                if dist <= obj.MaxActivationDistance and dist < minDist then
+                    minDist = dist
+                    nearest = obj
+                end
+            end
+        end
+    end
+    
+    return nearest, minDist
+end
+
+local function activatePrompt(prompt)
+    fireproximityprompt(prompt, 20, math.huge)
+    prompt:InputHoldBegin()
+    prompt:InputHoldEnd()
+end
+
+local function startInstantGrab()
+    if instantGrabEnabled then return end
+    
+    instantGrabEnabled = true
+    print("✅ Instant Grab: ON")
+    
+    instantGrabThread = task.spawn(function()
+        local currentPrompt = nil
+        local currentDistance = math.huge
+        local lastUpdate = 0
+        
+        RunService.Heartbeat:Connect(function()
+            local now = tick()
+            if now - lastUpdate >= 0.05 then
+                currentPrompt, currentDistance = findNearestPrompt()
+                lastUpdate = now
+            end
+        end)
+        
+        while instantGrabEnabled do
+            local character = player.Character
+            if character then
+                local humanoid = character:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.WalkSpeed > 25 then
+                    if currentPrompt and currentDistance <= currentPrompt.MaxActivationDistance then
+                        activatePrompt(currentPrompt)
+                        task.wait(1.5)
+                    else
+                        task.wait(0.1)
+                    end
+                else
+                    task.wait(0.5)
+                end
+            else
+                task.wait(1)
+            end
+        end
+    end)
+end
+
+local function stopInstantGrab()
+    if not instantGrabEnabled then return end
+    
+    instantGrabEnabled = false
+    print("❌ Instant Grab: OFF")
+    
+    if instantGrabThread then
+        task.cancel(instantGrabThread)
+        instantGrabThread = nil
+    end
+end
+
+local function toggleInstantGrab(state)
+    if state then
+        startInstantGrab()
+    else
+        stopInstantGrab()
     end
 end
 
@@ -2363,6 +2485,9 @@ table.insert(tabContent["Misc"], createToggleButton("Anti Ragdoll", function(sta
 end))
 table.insert(tabContent["Misc"], createToggleButton("Anti Trap", function(state)
     toggleAntiTrap(state)
+end))
+table.insert(tabContent["Main"], createToggleButton("Instant Grab", function(state)
+    toggleInstantGrab(state)
 end))
 
 -- DISCORD TAB
