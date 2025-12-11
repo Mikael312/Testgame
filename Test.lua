@@ -107,6 +107,11 @@ local baselockConnection = nil
 local bellSoundPlayed = false
 local currentBellSound = nil
 local BELL_SOUND_ID = "rbxassetid://3302969109"
+
+-- Unwalk Animation Variables (NEW)
+local unwalkAnimationEnabled = false
+local savedAnims = {}
+local unwalkAnimationWatcher = nil
 -- ==================== UI CREATION ====================
 for _, gui in pairs(game.CoreGui:GetChildren()) do
     if gui.Name == "NightmareHubUI" then
@@ -1098,6 +1103,101 @@ local function toggleInstantGrab(state)
         startInstantGrab()
     else
         stopInstantGrab()
+    end
+end
+
+-- ==================== UNWALK ANIMATION FUNCTION (NEW) ====================
+local function isWalkAnim(anim)
+    return anim and anim:IsA("Animation") and anim.Name:lower():find("walk")
+end
+
+local function stopWalks(hum)
+    if not hum then return end
+    for _, t in ipairs(hum:GetPlayingAnimationTracks()) do
+        if t.Name:lower():find("walk") then
+            t:Stop()
+        end
+    end
+end
+
+local function saveAndClear(anim)
+    for _, v in ipairs(savedAnims) do
+        if v.instance == anim then return end
+    end
+    table.insert(savedAnims, {instance = anim, id = anim.AnimationId})
+    anim.AnimationId = ""
+end
+
+local function restoreAnims()
+    for _, v in ipairs(savedAnims) do
+        if v.instance then
+            v.instance.AnimationId = v.id
+        end
+    end
+end
+
+local function added(desc)
+    if unwalkAnimationEnabled and isWalkAnim(desc) then
+        saveAndClear(desc)
+    end
+end
+
+local function scan(character)
+    local animate = character and character:FindFirstChild("Animate")
+    if not animate then return end
+    
+    local function clear(folder, name)
+        local anim = folder and folder:FindFirstChild(name)
+        if anim and anim:IsA("Animation") then
+            saveAndClear(anim)
+        end
+    end
+    
+    clear(animate:FindFirstChild("walk"), "WalkAnim")
+    clear(animate:FindFirstChild("run"), "RunAnim")
+    
+    local hum = character:FindFirstChildOfClass("Humanoid")
+    if hum then stopWalks(hum) end
+end
+
+local function startUnwalkAnimation()
+    if unwalkAnimationEnabled then return end
+    
+    local char = player.Character
+    if not char then return end
+    
+    unwalkAnimationEnabled = true
+    savedAnims = {}
+    
+    task.spawn(function()
+        scan(char)
+        if unwalkAnimationWatcher then unwalkAnimationWatcher:Disconnect() end
+        unwalkAnimationWatcher = char.DescendantAdded:Connect(added)
+    end)
+    
+    print("✅ Unwalk Animation: ON")
+end
+
+local function stopUnwalkAnimation()
+    if not unwalkAnimationEnabled then return end
+    
+    if unwalkAnimationWatcher then
+        unwalkAnimationWatcher:Disconnect()
+        unwalkAnimationWatcher = nil
+    end
+    
+    restoreAnims()
+    savedAnims = {}
+    unwalkAnimationEnabled = false
+    
+    print("❌ Unwalk Animation: OFF")
+end
+
+local function toggleUnwalkAnimation(state)
+    if state then
+        startUnwalkAnimation()
+    else
+        stopUnwalkAnimation()
     end
 end
 
@@ -2767,6 +2867,16 @@ end)
         startBaselockReminder()
         print("🔄 Reloaded Baselock Reminder after respawn")
     end
+    if unwalkAnimationEnabled then
+        task.wait(1)
+        savedAnims = {}
+        task.spawn(function()
+        scan(newCharacter)
+        if unwalkAnimationWatcher then unwalkAnimationWatcher:Disconnect() end
+        unwalkAnimationWatcher = newCharacter.DescendantAdded:Connect(added)
+        end)
+        print("🔄 Reloaded Unwalk Animation after respawn")
+    end
 
 -- ==================== TAB CONTENT ====================
 
@@ -2868,6 +2978,9 @@ table.insert(tabContent["Misc"], createToggleButton("Touch Fling V2", function(s
 end))
 table.insert(tabContent["Misc"], createToggleButton("Allow Friends", function(state)
     toggleAllowFriends(state)
+end))
+table.insert(tabContent["Misc"], createToggleButton("Unwalk Animation", function(state)
+    toggleUnwalkAnimation(state)
 end))
 
 -- DISCORD TAB
