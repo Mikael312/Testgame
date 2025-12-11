@@ -96,6 +96,9 @@ local instantGrabThread = nil
 -- Touch Fling V2 Variables (NEW)
 local touchFlingEnabled = false
 local touchFlingConnection = nil
+
+-- Allow Friends Variables (NEW)
+local allowFriendsEnabled = false
 -- ==================== UI CREATION ====================
 for _, gui in pairs(game.CoreGui:GetChildren()) do
     if gui.Name == "NightmareHubUI" then
@@ -1087,6 +1090,25 @@ local function toggleInstantGrab(state)
         startInstantGrab()
     else
         stopInstantGrab()
+    end
+end
+
+-- ==================== ALLOW FRIENDS FUNCTION (NEW) ====================
+local function toggleAllowFriends(state)
+    allowFriendsEnabled = state
+    
+    if allowFriendsEnabled then
+        -- Fire the remote to enable friends
+        pcall(function()
+            game:GetService("ReplicatedStorage"):WaitForChild("Packages"):WaitForChild("Net"):WaitForChild("RE/PlotService/ToggleFriends"):FireServer()
+        end)
+        print("✅ Allow Friends: ON")
+    else
+        -- Fire the remote to disable friends
+        pcall(function()
+            game:GetService("ReplicatedStorage"):WaitForChild("Packages"):WaitForChild("Net"):WaitForChild("RE/PlotService/ToggleFriends"):FireServer()
+        end)
+        print("❌ Allow Friends: OFF")
     end
 end
 
@@ -2574,6 +2596,9 @@ table.insert(tabContent["Main"], createToggleButton("Instant Grab", function(sta
 end))
 table.insert(tabContent["Misc"], createToggleButton("Touch Fling V2", function(state)
     toggleTouchFling(state)
+end))
+table.insert(tabContent["Misc"], createToggleButton("Allow Friends", function(state)
+    toggleAllowFriends(state)
 end))
 
 -- DISCORD TAB
