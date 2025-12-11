@@ -92,6 +92,10 @@ local monitoringLoop = nil
 -- Instant Grab Variables (NEW)
 local instantGrabEnabled = false
 local instantGrabThread = nil
+
+-- Touch Fling V2 Variables (NEW)
+local touchFlingEnabled = false
+local touchFlingConnection = nil
 -- ==================== UI CREATION ====================
 for _, gui in pairs(game.CoreGui:GetChildren()) do
     if gui.Name == "NightmareHubUI" then
@@ -1086,6 +1090,79 @@ local function toggleInstantGrab(state)
     end
 end
 
+-- ==================== TOUCH FLING V2 FUNCTION (NEW) ====================
+local function enableTouchFling()
+    -- Disable auto jump
+    pcall(function()
+        local character = player.Character
+        if character then
+            local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+            if humanoid and humanoid.AutoJumpEnabled ~= nil then
+                humanoid.AutoJumpEnabled = false
+            end
+        end
+    end)
+
+    -- Create marker if not exists
+    if not ReplicatedStorage:FindFirstChild("juisdfj0i32i0eidsuf0iok") then
+        local marker = Instance.new("Decal")
+        marker.Name = "juisdfj0i32i0eidsuf0iok"
+        marker.Parent = ReplicatedStorage
+    end
+
+    -- Start fling connection
+    touchFlingConnection = RunService.Heartbeat:Connect(function()
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local v = hrp.Velocity
+            hrp.Velocity = v * 10000 + Vector3.new(0, 10000, 0)
+            RunService.RenderStepped:Wait()
+            hrp.Velocity = v
+            RunService.Stepped:Wait()
+            hrp.Velocity = v + Vector3.new(0, 0.1, 0)
+        end
+    end)
+
+    touchFlingEnabled = true
+    print("✅ Touch Fling V2: ON")
+end
+
+local function disableTouchFling()
+    -- Disconnect fling connection
+    if touchFlingConnection then
+        touchFlingConnection:Disconnect()
+        touchFlingConnection = nil
+    end
+
+    -- Remove marker
+    local marker = ReplicatedStorage:FindFirstChild("juisdfj0i32i0eidsuf0iok")
+    if marker then
+        marker:Destroy()
+    end
+
+    -- Re-enable auto jump
+    pcall(function()
+        local character = player.Character
+        if character then
+            local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+            if humanoid then
+                humanoid.AutoJumpEnabled = true
+            end
+        end
+    end)
+
+    touchFlingEnabled = false
+    print("❌ Touch Fling V2: OFF")
+end
+
+local function toggleTouchFling(state)
+    if state then
+        enableTouchFling()
+    else
+        disableTouchFling()
+    end
+end
 -- ==================== ESP PLAYERS FUNCTION (FIXED) ====================
 local espPlayersEnabled = false
 local espObjects = {}
@@ -2405,6 +2482,12 @@ player.CharacterAdded:Connect(function(newCharacter)
         print("🔄 Reloaded anti-trap after respawn")
     end
 end)
+    if touchFlingEnabled then
+        task.wait(1)
+        disableTouchFling()
+        enableTouchFling()
+        print("🔄 Reloaded Touch Fling V2 after respawn")
+    end
 
 
 -- ==================== TAB CONTENT ====================
@@ -2488,6 +2571,9 @@ table.insert(tabContent["Misc"], createToggleButton("Anti Trap", function(state)
 end))
 table.insert(tabContent["Main"], createToggleButton("Instant Grab", function(state)
     toggleInstantGrab(state)
+end))
+table.insert(tabContent["Misc"], createToggleButton("Touch Fling V2", function(state)
+    toggleTouchFling(state)
 end))
 
 -- DISCORD TAB
