@@ -100,6 +100,11 @@ local touchFlingConnection = nil
 -- Allow Friends Variables (NEW)
 local allowFriendsEnabled = false
 
+-- Unwalk Animation Variables
+local unwalkAnimationEnabled = false
+local savedAnims = {}
+local unwalkWatcher = nil
+
 -- Baselock Reminder Variables (NEW)
 local baselockReminderEnabled = false
 local baselockAlertGui = nil
