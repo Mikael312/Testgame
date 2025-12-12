@@ -2924,6 +2924,9 @@ table.insert(tabContent["Main"], createToggleButton("Websling Control", function
         print("❌ Websling Control: OFF")
     end
 end))
+table.insert(tabContent["Main"], createToggleButton("Unwalk Animation", function(state)
+    toggleUnwalkAnimation(state)
+end))
 
 -- VISUAL TAB (5 TOGGLES - Renamed Brainrot ESP to Esp Best)
 tabContent["Visual"] = {}
@@ -2970,9 +2973,6 @@ table.insert(tabContent["Misc"], createToggleButton("Touch Fling V2", function(s
 end))
 table.insert(tabContent["Misc"], createToggleButton("Allow Friends", function(state)
     toggleAllowFriends(state)
-end))
-table.insert(tabContent["Misc"], createToggleButton("Unwalk Animation", function(state)
-    toggleUnwalkAnimation(state)
 end))
 
 -- DISCORD TAB
