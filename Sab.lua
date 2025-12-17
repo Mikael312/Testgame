@@ -1,6 +1,8 @@
 --[[
-    NIGHTMARE HUB 🎮 (Library Version)
+    NIGHTMARE HUB 🎮 (Library Version - Updated)
     All functions from the original script, now integrated with NightmareLib.
+    - "Respawn Desync" changed to "Use Cloner"
+    - "Unwalk Animation" changed to "Admin Panel Spammer"
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -1091,9 +1093,13 @@ end
 
 player.CharacterAdded:Connect(function(newCharacter) if antiBoogieEnabled then task.wait(0.5); setupInstantAnimationBlocker(); print("🔄 Reloaded animation blocker after respawn") end end)
 
--- ==================== EXTERNAL SCRIPT FUNCTIONS ====================
-local function toggleRespawnDesync(state)
-    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Respawn.lua"))() end); print("✅ Respawn Desync: Triggered") else print("❌ Respawn Desync: OFF") end
+-- ==================== EXTERNAL SCRIPT FUNCTIONS (UPDATED) ====================
+local function toggleUseCloner(state)
+    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Cloner.lua"))() end); print("✅ Use Cloner: Triggered") else print("❌ Use Cloner: OFF") end
+end
+
+local function toggleAdminPanelSpammer(state)
+    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Spammer.lua"))() end); print("✅ Admin Panel Spammer: ON") else print("❌ Admin Panel Spammer: OFF") end
 end
 
 local function toggleWebslingKill(state)
@@ -1102,10 +1108,6 @@ end
 
 local function toggleWebslingControl(state)
     if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/WebslingControl.lua"))() end); print("✅ Websling Control: ON") else print("❌ Websling Control: OFF") end
-end
-
-local function toggleUnwalkAnimation(state)
-    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Unwalkanim.lua"))() end); print("✅ Unwalk Animation: ON") else print("❌ Unwalk Animation: OFF") end
 end
 
 
@@ -1118,11 +1120,11 @@ NightmareHub:AddMainToggle("Aimbot", function(state) toggleAutoLaser(state) end)
 NightmareHub:AddMainToggle("Xray Base", function(state) toggleXrayBase(state) end)
 NightmareHub:AddMainToggle("Semi Invisible", function(state) toggleInvisibleV1(state) end)
 NightmareHub:AddMainToggle("Auto Kick After Steal", function(state) toggleAutoKickAfterSteal(state) end)
-NightmareHub:AddMainToggle("Respawn Desync", function(state) toggleRespawnDesync(state) end)
+NightmareHub:AddMainToggle("Use Cloner", function(state) toggleUseCloner(state) end) -- CHANGED
 NightmareHub:AddMainToggle("Websling Kill", function(state) toggleWebslingKill(state) end)
 NightmareHub:AddMainToggle("Baselock Reminder", function(state) toggleBaselockReminder(state) end)
 NightmareHub:AddMainToggle("Websling Control", function(state) toggleWebslingControl(state) end)
-NightmareHub:AddMainToggle("Unwalk Animation", function(state) toggleUnwalkAnimation(state) end)
+NightmareHub:AddMainToggle("Admin Panel Spammer", function(state) toggleAdminPanelSpammer(state) end) -- CHANGED
 NightmareHub:AddMainToggle("Instant Grab", function(state) toggleInstantGrab(state) end)
 
 -- VISUAL TAB
