@@ -1,10 +1,10 @@
 --[[
-    SIMPLE ARCADE UI 🎮 (UPDATED)
+    SIMPLE ARCADE UI 🎮 (UPDATED - CRITICAL FIXES)
     Rounded rectangle, draggable, arcade style
     WITH SWITCH BUTTON FOR FLY/WALK TO BASE (FIXED)
     WITH NEW RESPAWN DESYNC + SERVER POSITION ESP
     WITH AUTO-ENABLED NO WALK ANIMATION
-    WITH NEW FLY/TP TO BEST FEATURE (FIXED & SEPARATED)
+    WITH NEW FLY/TP TO BEST FEATURE (FULLY REWRITTEN)
 ]]
 
 -- ==================== SERVICES ====================
@@ -15,8 +15,8 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local PathfindingService = game:GetService("PathfindingService")
 local Workspace = game:GetService("Workspace")
-local StarterGui = game:GetService("StarterGui") -- Service for notifications
-local SoundService = game:GetService("SoundService") -- Service for sounds
+local StarterGui = game:GetService("StarterGui")
+local SoundService = game:GetService("SoundService")
 local HttpService = game:GetService("HttpService")
 
 -- ==================== VARIABLES ====================
@@ -25,16 +25,10 @@ local LocalPlayer = Players.LocalPlayer
 
 -- ==================== STEAL FLOOR VARIABLES ====================
 local allFeaturesEnabled = false
-
--- Floor Grab
 local floorGrabPart = nil
 local floorGrabConnection = nil
 local humanoidRootPart = nil
-
--- X-Ray Base
 local originalTransparency = {}
-
--- Auto Laser
 local autoLaserThread = nil
 local laserCapeEquipped = false
 
@@ -47,16 +41,21 @@ local respawnDesyncEnabled = false
 -- ==================== NO WALK ANIMATION VARIABLES ====================
 local noWalkAnimationEnabled = true
 
--- ==================== FLY/TP TO BEST VARIABLES ====================
+-- ==================== FLY/TP TO BEST VARIABLES (FIXED) ====================
+-- FIXED: Using separate, clear flags for each process to avoid confusion.
+local isFlyingToBase = false
+local isWalkingToBase = false
 local isFlyingToBest = false
-local flyVelocityConnection = nil
-local isTpProcessing = false -- Separate flag for TP processing
-local tpVelocityConnection = nil
+local isTpToBest = false
+
+local flyToBaseConnection = nil
+local walkToBaseThread = nil
+local flyToBestConnection = nil
+
 local isFlyToBestMode = true -- true = Fly, false = TP
 
 -- ==================== MODULE DATA FOR BEST PET DETECTION ====================
 local AnimalsModule, TraitsModule, MutationsModule
-
 pcall(function()
     AnimalsModule = require(ReplicatedStorage.Datas.Animals)
     TraitsModule = require(ReplicatedStorage.Datas.Traits)
@@ -67,71 +66,32 @@ end)
 local function setupNoWalkAnimation(character)
     local humanoid = character:WaitForChild("Humanoid")
     local animator = humanoid:WaitForChild("Animator")
-    
     local function stopAllAnimations()
         local tracks = animator:GetPlayingAnimationTracks()
-        for _, track in pairs(tracks) do
-            if track.IsPlaying then
-                track:Stop()
-            end
-        end
+        for _, track in pairs(tracks) do if track.IsPlaying then track:Stop() end end
     end
-    
-    -- Initial stop
     stopAllAnimations()
-    
-    -- Stop animations when running
-    humanoid.Running:Connect(function(speed)
-        stopAllAnimations()
-    end)
-    
-    -- Stop animations when jumping
-    humanoid.Jumping:Connect(function()
-        stopAllAnimations()
-    end)
-    
-    -- Stop any new animations that try to play
-    animator.AnimationPlayed:Connect(function(animationTrack)
-        animationTrack:Stop()
-    end)
-    
-    -- Continuous stop on RenderStepped
-    RunService.RenderStepped:Connect(function()
-        stopAllAnimations()
-    end)
-    
+    humanoid.Running:Connect(stopAllAnimations)
+    humanoid.Jumping:Connect(stopAllAnimations)
+    animator.AnimationPlayed:Connect(function(animationTrack) animationTrack:Stop() end)
+    RunService.RenderStepped:Connect(stopAllAnimations)
     print("🚫 No Walk Animation: ACTIVE")
 end
 
 -- ==================== STEAL FLOOR FUNCTIONS ====================
--- ========================================
--- UPDATE HUMANOID ROOT PART
--- ========================================
 local function updateHumanoidRootPart()
     local character = LocalPlayer.Character
-    if character then
-        humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-    end
+    if character then humanoidRootPart = character:FindFirstChild("HumanoidRootPart") end
 end
-
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
     updateHumanoidRootPart()
-    
-    -- Auto-enable No Walk Animation on character respawn
-    if noWalkAnimationEnabled then
-        setupNoWalkAnimation(LocalPlayer.Character)
-    end
+    if noWalkAnimationEnabled then setupNoWalkAnimation(LocalPlayer.Character) end
 end)
-
 updateHumanoidRootPart()
 
--- ========================================
--- FLOOR GRAB FUNCTIONS
--- ========================================
 local function startFloorGrab()
     if floorGrabPart then return end
-    
     floorGrabPart = Instance.new("Part")
     floorGrabPart.Size = Vector3.new(6, 0.5, 6)
     floorGrabPart.Anchored = true
@@ -140,7 +100,6 @@ local function startFloorGrab()
     floorGrabPart.Material = Enum.Material.Plastic
     floorGrabPart.Color = Color3.fromRGB(255, 200, 0)
     floorGrabPart.Parent = workspace
-    
     floorGrabConnection = RunService.Heartbeat:Connect(function()
         if humanoidRootPart then
             local position = humanoidRootPart.Position
@@ -148,122 +107,46 @@ local function startFloorGrab()
             floorGrabPart.Position = Vector3.new(position.X, position.Y - yOffset, position.Z)
         end
     end)
-    
     print("✅ Floor Grab: ON")
 end
-
 local function stopFloorGrab()
-    if floorGrabConnection then
-        floorGrabConnection:Disconnect()
-        floorGrabConnection = nil
-    end
-    
-    if floorGrabPart then
-        floorGrabPart:Destroy()
-        floorGrabPart = nil
-    end
-    
+    if floorGrabConnection then floorGrabConnection:Disconnect() floorGrabConnection = nil end
+    if floorGrabPart then floorGrabPart:Destroy() floorGrabPart = nil end
     print("❌ Floor Grab: OFF")
 end
 
--- ========================================
--- X-RAY BASE FUNCTIONS
--- ========================================
-local function saveOriginalTransparency()
-    originalTransparency = {}
-    local plots = workspace:FindFirstChild("Plots")
-    if plots then
-        for _, plot in pairs(plots:GetChildren()) do
-            for _, part in pairs(plot:GetDescendants()) do
-                if part:IsA("BasePart") and (part.Name:lower():find("base plot") or part.Name:lower():find("base") or part.Name:lower():find("plot")) then
-                    originalTransparency[part] = part.Transparency
-                end
-            end
-        end
-    end
-end
-
-local function applyTransparency()
-    local plots = workspace:FindFirstChild("Plots")
-    if plots then
-        for _, plot in pairs(plots:GetChildren()) do
-            for _, part in pairs(plot:GetDescendants()) do
-                if part:IsA("BasePart") and (part.Name:lower():find("base plot") or part.Name:lower():find("base") or part.Name:lower():find("plot")) then
-                    if originalTransparency[part] == nil then
-                        originalTransparency[part] = part.Transparency
-                    end
-                    part.Transparency = 0.5
-                end
-            end
-        end
-    end
-end
-
-local function restoreTransparency()
-    local plots = workspace:FindFirstChild("Plots")
-    if plots then
-        for _, plot in pairs(plots:GetChildren()) do
-            for _, part in pairs(plot:GetDescendants()) do
-                if part:IsA("BasePart") and (part.Name:lower():find("base plot") or part.Name:lower():find("base") or part.Name:lower():find("plot")) then
-                    if originalTransparency[part] ~= nil then
-                        part.Transparency = originalTransparency[part]
-                    end
-                end
-            end
-        end
-    end
-end
-
 local function startXrayBase()
-    saveOriginalTransparency()
-    applyTransparency()
+    local plots = workspace:FindFirstChild("Plots")
+    if plots then for _, plot in pairs(plots:GetChildren()) do
+        for _, part in pairs(plot:GetDescendants()) do
+            if part:IsA("BasePart") and (part.Name:lower():find("base plot") or part.Name:lower():find("base") or part.Name:lower():find("plot")) then
+                if originalTransparency[part] == nil then originalTransparency[part] = part.Transparency end
+                part.Transparency = 0.5
+            end
+        end
+    end end
     print("✅ X-Ray Base: ON")
 end
-
 local function stopXrayBase()
-    restoreTransparency()
+    local plots = workspace:FindFirstChild("Plots")
+    if plots then for _, plot in pairs(plots:GetChildren()) do
+        for _, part in pairs(plot:GetDescendants()) do
+            if part:IsA("BasePart") and (part.Name:lower():find("base plot") or part.Name:lower():find("base") or part.Name:lower():find("plot")) then
+                if originalTransparency[part] ~= nil then part.Transparency = originalTransparency[part] end
+            end
+        end
+    end end
     print("❌ X-Ray Base: OFF")
 end
 
--- Monitor new plots
-local plots = workspace:FindFirstChild("Plots")
-if plots then
-    plots.ChildAdded:Connect(function(newPlot)
-        task.wait(0.5)
-        if allFeaturesEnabled then
-            for _, part in pairs(newPlot:GetDescendants()) do
-                if part:IsA("BasePart") and (part.Name:lower():find("base plot") or part.Name:lower():find("base") or part.Name:lower():find("plot")) then
-                    originalTransparency[part] = part.Transparency
-                    part.Transparency = 0.5
-                end
-            end
-        end
-    end)
-end
-
--- ========================================
--- AUTO LASER FUNCTIONS
--- ========================================
 local function autoEquipLaserCape()
     local character = LocalPlayer.Character
     if not character then return false end
-    
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return false end
-    
-    -- Check if already equipped
-    local currentTool = character:FindFirstChild("Laser Cape")
-    if currentTool then
-        laserCapeEquipped = true
-        return true
-    end
-    
-    -- Find in backpack
     local backpack = LocalPlayer:WaitForChild("Backpack")
     local laserCape = backpack:FindFirstChild("Laser Cape")
-    
     if laserCape then
-        -- Equip the Laser Cape
         humanoid:EquipTool(laserCape)
         task.wait(0.3)
         laserCapeEquipped = true
@@ -274,20 +157,16 @@ local function autoEquipLaserCape()
         return false
     end
 end
-
 local function getLaserRemote()
     local remote = nil
     pcall(function()
         if ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Net") then
             remote = ReplicatedStorage.Packages.Net:FindFirstChild("RE/UseItem") or ReplicatedStorage.Packages.Net:FindFirstChild("RE"):FindFirstChild("UseItem")
         end
-        if not remote then
-            remote = ReplicatedStorage:FindFirstChild("RE/UseItem") or ReplicatedStorage:FindFirstChild("UseItem")
-        end
+        if not remote then remote = ReplicatedStorage:FindFirstChild("RE/UseItem") or ReplicatedStorage:FindFirstChild("UseItem") end
     end)
     return remote
 end
-
 local function isValidTarget(player)
     if not player or not player.Character or player == LocalPlayer then return false end
     local hrp = player.Character:FindFirstChild("HumanoidRootPart")
@@ -296,127 +175,68 @@ local function isValidTarget(player)
     if humanoid.Health <= 0 then return false end
     return true
 end
-
 local function findNearestPlayer()
     if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return nil end
     local myPos = LocalPlayer.Character.HumanoidRootPart.Position
     local nearest = nil
     local nearestDist = math.huge
-    
     for _, player in ipairs(Players:GetPlayers()) do
         if isValidTarget(player) then
             local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
             if targetHRP then
                 local distance = (Vector3.new(targetHRP.Position.X, 0, targetHRP.Position.Z) - Vector3.new(myPos.X, 0, myPos.Z)).Magnitude
-                if distance < nearestDist then
-                    nearestDist = distance
-                    nearest = player
-                end
+                if distance < nearestDist then nearestDist = distance nearest = player end
             end
         end
     end
-    
     return nearest
 end
-
 local function safeFire(targetPlayer)
     if not targetPlayer or not targetPlayer.Character then return end
     local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not targetHRP then return end
-    
     local remote = getLaserRemote()
     if remote and remote.FireServer then
         pcall(function()
-            local args = {
-                [1] = targetHRP.Position,
-                [2] = targetHRP
-            }
+            local args = { [1] = targetHRP.Position, [2] = targetHRP }
             remote:FireServer(unpack(args))
         end)
     end
 end
-
 local function autoLaserWorker()
     while allFeaturesEnabled do
         local target = findNearestPlayer()
-        if target then
-            safeFire(target)
-        end
-        
+        if target then safeFire(target) end
         local startTime = tick()
-        while tick() - startTime < 0.6 do
-            if not allFeaturesEnabled then break end
-            RunService.Heartbeat:Wait()
-        end
+        while tick() - startTime < 0.6 do if not allFeaturesEnabled then break end RunService.Heartbeat:Wait() end
     end
 end
-
 local function startAutoLaser()
-    -- Auto-equip Laser Cape first
-    if not autoEquipLaserCape() then
-        print("❌ Failed to equip Laser Cape! Cannot start Auto Laser.")
-        return
-    end
-    
-    if autoLaserThread then
-        task.cancel(autoLaserThread)
-    end
+    if not autoEquipLaserCape() then print("❌ Failed to equip Laser Cape! Cannot start Auto Laser.") return end
+    if autoLaserThread then task.cancel(autoLaserThread) end
     autoLaserThread = task.spawn(autoLaserWorker)
     print("✅ Auto Laser: ON")
 end
-
 local function stopAutoLaser()
-    if autoLaserThread then
-        task.cancel(autoLaserThread)
-        autoLaserThread = nil
-    end
-    
+    if autoLaserThread then task.cancel(autoLaserThread) autoLaserThread = nil end
     laserCapeEquipped = false
-    
-    -- Unequip Laser Cape
     local character = LocalPlayer.Character
     if character then
         local humanoid = character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            humanoid:UnequipTools()
-        end
+        if humanoid then humanoid:UnequipTools() end
     end
-    
     print("❌ Auto Laser: OFF")
 end
-
--- ========================================
--- MASTER TOGGLE FUNCTION
--- ========================================
 local function toggleAllFeatures(enabled)
     allFeaturesEnabled = enabled
-    
     if allFeaturesEnabled then
-        print("═══════════════════════════════")
         print("🚀 ACTIVATING ALL FEATURES...")
-        print("═══════════════════════════════")
-        
-        -- Start all features
-        startFloorGrab()
-        startXrayBase()
-        startAutoLaser()
-        
-        print("═══════════════════════════════")
+        startFloorGrab() startXrayBase() startAutoLaser()
         print("✅ ALL FEATURES ACTIVATED!")
-        print("═══════════════════════════════")
     else
-        print("═══════════════════════════════")
         print("🛑 DEACTIVATING ALL FEATURES...")
-        print("═══════════════════════════════")
-        
-        -- Stop all features
-        stopFloorGrab()
-        stopXrayBase()
-        stopAutoLaser()
-        
-        print("═══════════════════════════════")
+        stopFloorGrab() stopXrayBase() stopAutoLaser()
         print("❌ ALL FEATURES DEACTIVATED!")
-        print("═══════════════════════════════")
     end
 end
 
@@ -424,64 +244,40 @@ end
 local speedConn
 local baseSpeed = 27
 local speedEnabled = false
-
 local function GetCharacter()
     local Char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
     local HRP = Char:WaitForChild("HumanoidRootPart")
     local Hum = Char:FindFirstChildOfClass("Humanoid")
     return Char, HRP, Hum
 end
-
 local function getMovementInput()
     local Char, HRP, Hum = GetCharacter()
     if not Char or not HRP or not Hum then return Vector3.new(0,0,0) end
     local moveVector = Hum.MoveDirection
-    if moveVector.Magnitude > 0.1 then
-        return Vector3.new(moveVector.X, 0, moveVector.Z).Unit
-    end
+    if moveVector.Magnitude > 0.1 then return Vector3.new(moveVector.X, 0, moveVector.Z).Unit end
     return Vector3.new(0,0,0)
 end
-
 local function startSpeedControl()
     if speedConn then return end
     speedConn = RunService.Heartbeat:Connect(function()
         local Char, HRP, Hum = GetCharacter()
         if not Char or not HRP or not Hum then return end
-        
         local inputDirection = getMovementInput()
-        
         if inputDirection.Magnitude > 0 then
-            HRP.AssemblyLinearVelocity = Vector3.new(
-                inputDirection.X * baseSpeed,
-                HRP.AssemblyLinearVelocity.Y,
-                inputDirection.Z * baseSpeed
-            )
+            HRP.AssemblyLinearVelocity = Vector3.new(inputDirection.X * baseSpeed, HRP.AssemblyLinearVelocity.Y, inputDirection.Z * baseSpeed)
         else
             HRP.AssemblyLinearVelocity = Vector3.new(0, HRP.AssemblyLinearVelocity.Y, 0)
         end
     end)
 end
-
 local function stopSpeedControl()
-    if speedConn then 
-        speedConn:Disconnect() 
-        speedConn = nil 
-    end
+    if speedConn then speedConn:Disconnect() speedConn = nil end
     local _, HRP = GetCharacter()
-    if HRP then 
-        HRP.AssemblyLinearVelocity = Vector3.new(0, HRP.AssemblyLinearVelocity.Y, 0) 
-    end
+    if HRP then HRP.AssemblyLinearVelocity = Vector3.new(0, HRP.AssemblyLinearVelocity.Y, 0) end
 end
-
 local function toggleSpeed(enabled)
     speedEnabled = enabled
-    if speedEnabled then
-        startSpeedControl()
-        print("✅ Speed Booster aktif!")
-    else
-        stopSpeedControl()
-        print("❌ Speed Booster nonaktif!")
-    end
+    if speedEnabled then startSpeedControl() print("✅ Speed Booster aktif!") else stopSpeedControl() print("❌ Speed Booster nonaktif!") end
 end
 
 -- ==================== IMPROVED INFINITE JUMP + AUTO GOD MODE ====================
@@ -489,18 +285,13 @@ local infJumpEnabled = false
 local gravityConnection = nil
 local healthConnection = nil
 local stateConnection = nil
-local initialMaxHealth = 100 -- Untuk simpan nyawa asal
-
+local initialMaxHealth = 100
 local function toggleInfJump(enabled)
     infJumpEnabled = enabled
     local character = LocalPlayer.Character
     local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-
     if enabled then
-        print("🔴 Infinite Jump: ON")
-        print("✅ God Mode: Auto-Enabled")
-
-        -- --- Infinite Jump Logic ---
+        print("🔴 Infinite Jump: ON") print("✅ God Mode: Auto-Enabled")
         if gravityConnection then gravityConnection:Disconnect() end
         gravityConnection = RunService.Heartbeat:Connect(function()
             local char = LocalPlayer.Character
@@ -509,226 +300,55 @@ local function toggleInfJump(enabled)
             local hum = char:FindFirstChildOfClass("Humanoid")
             if hrp and hum then
                 local velocity = hrp.AssemblyLinearVelocity
-                if velocity.Y < 0 then
-                    hrp.AssemblyLinearVelocity = Vector3.new(velocity.X, velocity.Y * 0.85, velocity.Z)
-                end
+                if velocity.Y < 0 then hrp.AssemblyLinearVelocity = Vector3.new(velocity.X, velocity.Y * 0.85, velocity.Z) end
             end
         end)
-
         if humanoid then
-            humanoid.UseJumpPower = true
-            humanoid.JumpPower = 70
-            initialMaxHealth = humanoid.MaxHealth -- Simpan nyawa asal
-            humanoid.MaxHealth = math.huge
-            humanoid.Health = math.huge
+            humanoid.UseJumpPower = true humanoid.JumpPower = 70 initialMaxHealth = humanoid.MaxHealth
+            humanoid.MaxHealth = math.huge humanoid.Health = math.huge
         end
-
-        -- --- God Mode Logic ---
         if healthConnection then healthConnection:Disconnect() end
-        healthConnection = humanoid.HealthChanged:Connect(function(health)
-            if health < math.huge then
-                humanoid.Health = math.huge
-            end
-        end)
-
+        healthConnection = humanoid.HealthChanged:Connect(function(health) if health < math.huge then humanoid.Health = math.huge end end)
         if stateConnection then stateConnection:Disconnect() end
         stateConnection = humanoid.StateChanged:Connect(function(oldState, newState)
-            if newState == Enum.HumanoidStateType.Dead then
-                humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-                humanoid.Health = math.huge
-            end
+            if newState == Enum.HumanoidStateType.Dead then humanoid:ChangeState(Enum.HumanoidStateType.GettingUp) humanoid.Health = math.huge end
         end)
-
     else
-        print("⚫ Infinite Jump: OFF")
-        print("❌ God Mode: Auto-Disabled")
-
-        -- --- Cleanup ---
-        if gravityConnection then
-            gravityConnection:Disconnect()
-            gravityConnection = nil
-        end
-        if healthConnection then
-            healthConnection:Disconnect()
-            healthConnection = nil
-        end
-        if stateConnection then
-            stateConnection:Disconnect()
-            stateConnection = nil
-        end
-
+        print("⚫ Infinite Jump: OFF") print("❌ God Mode: Auto-Disabled")
+        if gravityConnection then gravityConnection:Disconnect() gravityConnection = nil end
+        if healthConnection then healthConnection:Disconnect() healthConnection = nil end
+        if stateConnection then stateConnection:Disconnect() stateConnection = nil end
         if humanoid then
-            humanoid.JumpPower = 50 -- Reset ke default
-            humanoid.MaxHealth = initialMaxHealth
-            humanoid.Health = initialMaxHealth
+            humanoid.JumpPower = 50 humanoid.MaxHealth = initialMaxHealth humanoid.Health = initialMaxHealth
         end
     end
 end
-
--- Infinite Jump functionality (sentiasa aktif, tetapi hanya berfungsi jika dihidupkan)
 UserInputService.JumpRequest:Connect(function()
     if infJumpEnabled then
         local character = LocalPlayer.Character
         if character then
             local humanoid = character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-            end
+            if humanoid then humanoid:ChangeState(Enum.HumanoidStateType.Jumping) end
         end
     end
 end)
+LocalPlayer.CharacterAdded:Connect(function(c) task.wait(0.5) if infJumpEnabled then toggleInfJump(true) end end)
 
--- Jika respawn, aktifkan semula jika toggle masih ON
-LocalPlayer.CharacterAdded:Connect(function(c)
-    task.wait(0.5) -- Tunggu karakter load
-    if infJumpEnabled then
-        toggleInfJump(true)
-    end
-end)
+-- ==================== FLY / WALK TO BASE (FULLY REWRITTEN) ====================
+local FLOAT_SPEED = 50
+local STOP_DISTANCE = 10
 
--- ==================== FLY / WALK TO BASE (FIXED) ====================
-local isTraveling = false
-local floatConnection = nil
-local walkThread = nil
-local playerBaseName = player.DisplayName .. "'s Base"
-
--- Settings
-local FLOAT_SPEED = 17
-local FLOAT_UP_SPEED = 1.5
-local FLOAT_HEIGHT_OFFSET = 5
-local STOP_DISTANCE = 8
-
--- --- FLY TO BASE FUNCTIONS ---
-local function findPlayerPlot()
-    local plots = workspace:FindFirstChild("Plots")
-    if not plots then 
-        warn("❌ Plots folder not found!")
-        return nil 
-    end
-    
-    for _, plot in pairs(plots:GetChildren()) do
-        if plot:IsA("Model") or plot:IsA("Folder") then
-            local plotSign = plot:FindFirstChild("PlotSign")
-            if plotSign and plotSign:FindFirstChild("SurfaceGui") then
-                local surfaceGui = plotSign.SurfaceGui
-                if surfaceGui:FindFirstChild("Frame") and surfaceGui.Frame:FindFirstChild("TextLabel") then
-                    local plotSignText = surfaceGui.Frame.TextLabel.Text
-                    
-                    if plotSignText == playerBaseName then
-                        print("✅ Found player's plot:", plot.Name)
-                        return plot
-                    end
-                end
-            end
-        end
-    end
-    
-    warn("❌ Player's base not found!")
-    return nil
-end
-
-local function stopAllTravel()
-    isTraveling = false
-    
-    -- Stop Flying
-    if floatConnection then
-        floatConnection:Disconnect()
-        floatConnection = nil
-    end
-    
-    -- Stop Walking
-    if walkThread then
-        task.cancel(walkThread)
-        walkThread = nil
-    end
-    
-    -- Stop character movement
-    local Character = player.Character
-    if Character then
-        local RootPart = Character:FindFirstChild("HumanoidRootPart")
-        local Humanoid = Character:FindFirstChild("Humanoid")
-        if RootPart then
-            RootPart.Velocity = Vector3.new(0, 0, 0)
-            RootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-        end
-        if Humanoid then
-            Humanoid:MoveTo(RootPart.Position)
-        end
-    end
-    
-    print("🛑 All travel stopped")
-end
-
-local function doFlyToBase()
-    local Character = player.Character
-    if not Character then return false end
-    
-    local RootPart = Character:FindFirstChild("HumanoidRootPart")
-    if not RootPart then return false end
-    
-    -- Menggunakan FindDelivery() daripada findCollectZone()
-    local deliveryHitbox = FindDelivery()
-    if not deliveryHitbox then
-        warn("❌ Cannot find DeliveryHitbox!")
-        return false
-    end
-    
-    local targetPosition = deliveryHitbox.Position + Vector3.new(0, FLOAT_HEIGHT_OFFSET, 0)
-    print("🎈 Flying to DeliveryHitbox at:", targetPosition)
-    
-    floatConnection = RunService.Heartbeat:Connect(function()
-        if not isTraveling then
-            stopAllTravel()
-            return
-        end
-        
-        if not Character or not Character.Parent or not RootPart or not RootPart.Parent then
-            stopAllTravel()
-            return
-        end
-        
-        local currentPos = RootPart.Position
-        local deliveryPos = deliveryHitbox.Position
-        
-        local horizontalDistance = (Vector3.new(currentPos.X, 0, currentPos.Z) - Vector3.new(deliveryPos.X, 0, deliveryPos.Z)).Magnitude
-        
-        if horizontalDistance <= STOP_DISTANCE then
-            print("✅ Arrived at DeliveryHitbox!")
-            stopAllTravel()
-            return
-        end
-        
-        local direction = (targetPosition - currentPos).Unit
-        local horizontalDir = Vector3.new(direction.X, 0, direction.Z).Unit
-        
-        RootPart.Velocity = Vector3.new(
-            horizontalDir.X * FLOAT_SPEED,
-            FLOAT_UP_SPEED,
-            horizontalDir.Z * FLOAT_SPEED
-        )
-    end)
-    
-    return true
-end
-
---- WALK TO BASE FUNCTIONS ---
+-- FIXED: Simplified and more reliable function to find the delivery hitbox.
 local function FindDelivery()
-    local plots = workspace:WaitForChild("Plots", 5)
-    if not plots then
-        warn("❌ Plots folder not found in workspace")
-        return nil
-    end
-    
+    local plots = workspace:FindFirstChild("Plots")
+    if not plots then warn("❌ Plots folder not found!") return nil end
     for _, plot in pairs(plots:GetChildren()) do
         local sign = plot:FindFirstChild("PlotSign")
         if sign then
             local yourBase = sign:FindFirstChild("YourBase")
             if yourBase and yourBase.Enabled then
                 local hitbox = plot:FindFirstChild("DeliveryHitbox")
-                if hitbox then 
-                    print("✅ Found DeliveryHitbox in:", plot.Name)
-                    return hitbox 
-                end
+                if hitbox then print("✅ Found DeliveryHitbox in:", plot.Name) return hitbox end
             end
         end
     end
@@ -736,215 +356,89 @@ local function FindDelivery()
     return nil
 end
 
-local function WalkTo(target)
-    if not target or not target:IsA("BasePart") then 
-        warn("❌ Invalid target for WalkTo")
-        return false
+-- FIXED: A single, reliable function to stop all travel processes.
+local function stopAllTravel()
+    isFlyingToBase = false
+    isWalkingToBase = false
+    if flyToBaseConnection then flyToBaseConnection:Disconnect() flyToBaseConnection = nil end
+    if walkToBaseThread then task.cancel(walkToBaseThread) walkToBaseThread = nil end
+    local Character = player.Character
+    if Character and Character:FindFirstChild("HumanoidRootPart") then
+        Character.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
     end
+    print("🛑 All travel to base stopped.")
+end
 
-    local character = player.Character
-    if not character or not character.Parent then return false end
-    local humanoid = character:FindFirstChild("Humanoid")
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-
-    if not humanoid or not hrp then
-        warn("❌ Character components missing")
-        return false
-    end
-
-    local path = PathfindingService:CreatePath({
-        AgentRadius = 2,
-        AgentHeight = 5,
-        AgentCanJump = true,
-        AgentJumpHeight = 8,
-        AgentMaxSlope = 45
-    })
-
-    local success, errorMessage = pcall(function()
-        path:ComputeAsync(hrp.Position, target.Position)
-    end)
-
-    if not success then
-        warn("❌ Path computation failed:", errorMessage)
-        return false
-    end
-
-    if path.Status == Enum.PathStatus.Success then
-        local waypoints = path:GetWaypoints()
-        print("🚶 Walking to DeliveryHitbox... (" .. #waypoints .. " waypoints)")
-        
-        for i, waypoint in ipairs(waypoints) do
-            if not isTraveling then
-                print("⚠️ Walk cancelled by user")
-                return false
-            end
-            
-            if not humanoid or not hrp or not humanoid.Parent then
-                warn("❌ Character components missing during pathfinding")
-                return false
-            end
-            
-            humanoid:MoveTo(waypoint.Position)
-            
-            local moveFinished = false
-            local timeoutThread = task.delay(2, function()
-                if not moveFinished then
-                    humanoid:MoveTo(hrp.Position)
-                end
-            end)
-            
-            humanoid.MoveToFinished:Wait()
-            moveFinished = true
-            task.cancel(timeoutThread)
-            
-            local distance = (hrp.Position - target.Position).Magnitude
-            if distance < 5 then
-                print("✅ Reached DeliveryHitbox!")
-                return true
-            end
+-- FIXED: Simplified fly logic.
+local function doFlyToBase()
+    local Character = player.Character
+    if not Character or not Character:FindFirstChild("HumanoidRootPart") then warn("❌ Character or HRP not found!") return false end
+    local deliveryHitbox = FindDelivery()
+    if not deliveryHitbox then return false end
+    local targetPosition = deliveryHitbox.Position
+    local RootPart = Character.HumanoidRootPart
+    print("🎈 Flying to Base at:", targetPosition)
+    isFlyingToBase = true
+    flyToBaseConnection = RunService.Heartbeat:Connect(function()
+        if not isFlyingToBase or not RootPart or not RootPart.Parent then stopAllTravel() return end
+        local distance = (targetPosition - RootPart.Position).Magnitude
+        if distance <= STOP_DISTANCE then
+            print("✅ Arrived at Base!")
+            stopAllTravel()
+            return
         end
-        
-        print("✅ Finished walking path")
-        return true
-    else
-        warn("❌ Path not found! Status:", path.Status)
-        return false
-    end
+        local direction = (targetPosition - RootPart.Position).Unit
+        RootPart.Velocity = direction * FLOAT_SPEED
+    end)
+    return true
 end
 
 local function doWalkToBase()
     local delivery = FindDelivery()
-    if not delivery then
-        warn("❌ Failed to find DeliveryHitbox")
-        return false
+    if not delivery then return false end
+    local character = player.Character
+    if not character or not character.Parent then return false end
+    local humanoid = character:FindFirstChild("Humanoid")
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not hrp then return false end
+    local path = PathfindingService:CreatePath({AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, AgentJumpHeight = 8, AgentMaxSlope = 45})
+    local success, errorMessage = pcall(function() path:ComputeAsync(hrp.Position, delivery.Position) end)
+    if not success or path.Status ~= Enum.PathStatus.Success then warn("❌ Path not found!") return false end
+    local waypoints = path:GetWaypoints()
+    print("🚶 Walking to Base... (" .. #waypoints .. " waypoints)")
+    isWalkingToBase = true
+    for i, waypoint in ipairs(waypoints) do
+        if not isWalkingToBase then print("⚠️ Walk cancelled by user") return false end
+        if not humanoid or not hrp or not humanoid.Parent then warn("❌ Character components missing") return false end
+        humanoid:MoveTo(waypoint.Position)
+        humanoid.MoveToFinished:Wait()
+        local distance = (hrp.Position - delivery.Position).Magnitude
+        if distance < 5 then print("✅ Reached Base!") return true end
     end
-    
-    local success = WalkTo(delivery)
-    
-    if success then
-        print("✅ Successfully reached delivery!")
-    else
-        print("⚠️ Walk to delivery failed or was cancelled")
-    end
-    
     return true
 end
 
--- ==================== FLY/TP TO BEST FUNCTIONS (FIXED & SEPARATED) ====================
--- Helper function to get trait multiplier
-local function getTraitMultiplier(model)
-    if not TraitsModule then return 0 end
-    
-    local traitJson = model:GetAttribute("Traits")
-    if not traitJson or traitJson == "" then
-        return 0
-    end
-
-    local traits = {}
-    local ok, decoded = pcall(function()
-        return HttpService:JSONDecode(traitJson)
-    end)
-
-    if ok and typeof(decoded) == "table" then
-        traits = decoded
-    else
-        for t in string.gmatch(traitJson, "[^,]+") do
-            table.insert(traits, t)
-        end
-    end
-
-    local mult = 0
-    for _, entry in pairs(traits) do
-        local name = typeof(entry) == "table" and entry.Name or tostring(entry)
-        name = name:gsub("^_Trait%.", "")
-
-        local trait = TraitsModule[name]
-        if trait and trait.MultiplierModifier then
-            mult += tonumber(trait.MultiplierModifier) or 0
-        end
-    end
-
-    return mult
-end
-
--- Helper function to get final generation
-local function getFinalGeneration(model)
-    if not AnimalsModule then return 0 end
-    
-    local animalData = AnimalsModule[model.Name]
-    if not animalData then return 0 end
-
-    local baseGen = tonumber(animalData.Generation) or tonumber(animalData.Price or 0)
-
-    local traitMult = getTraitMultiplier(model)
-
-    local mutationMult = 0
-    if MutationsModule then
-        local mutation = model:GetAttribute("Mutation")
-        if mutation and MutationsModule[mutation] then
-            mutationMult = tonumber(MutationsModule[mutation].Modifier or 0)
-        end
-    end
-
-    local final = baseGen * (1 + traitMult + mutationMult)
-    return math.max(1, math.round(final))
-end
-
--- Format number for display
-local function formatNumber(num)
-    if num >= 1e12 then
-        return string.format("%.1fT/s", num / 1e12)
-    elseif num >= 1e9 then
-        return string.format("%.1fB/s", num / 1e9)
-    elseif num >= 1e6 then
-        return string.format("%.1fM/s", num / 1e6)
-    elseif num >= 1e3 then
-        return string.format("%.1fK/s", num / 1e3)
-    else
-        return string.format("%.0f/s", num)
-    end
-end
-
-local function isPlayerPlot(plot)
-    local plotSign = plot:FindFirstChild("PlotSign")
-    if plotSign then
-        local yourBase = plotSign:FindFirstChild("YourBase")
-        if yourBase and yourBase.Enabled then
-            return true
-        end
-    end
-    return false
-end
-
+-- ==================== FLY/TP TO BEST FUNCTIONS (FULLY REWRITTEN) ====================
+-- FIXED: Using the more robust detection logic provided by the user.
 local function findBestPet()
     local plots = Workspace:FindFirstChild("Plots")
     if not plots then return nil end
-    
     local highest = {value = 0}
-    
-    -- First try using the new module-based system
     if AnimalsModule then
         for _, plot in pairs(plots:GetChildren()) do
-            if not isPlayerPlot(plot) then
+            local plotSign = plot:FindFirstChild("PlotSign")
+            if plotSign and not plotSign:FindFirstChild("YourBase") then
                 for _, obj in pairs(plot:GetDescendants()) do
                     if obj:IsA("Model") and AnimalsModule[obj.Name] then
                         pcall(function()
                             local gen = getFinalGeneration(obj)
-                            
                             if gen > 0 and gen > highest.value then
                                 local root = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart
-                                
                                 if root then
                                     highest = {
-                                        plot = plot,
-                                        plotName = plot.Name,
-                                        petName = obj.Name,
-                                        generation = gen,
-                                        formattedValue = formatNumber(gen),
-                                        model = obj,
-                                        value = gen,
-                                        position = root.Position,
-                                        cframe = root.CFrame
+                                        plot = plot, plotName = plot.Name, petName = obj.Name, generation = gen,
+                                        formattedValue = formatNumber(gen), model = obj, value = gen,
+                                        position = root.Position, cframe = root.CFrame
                                     }
                                 end
                             end
@@ -953,497 +447,196 @@ local function findBestPet()
                 end
             end
         end
-        
-        if highest.value > 0 then
-            return highest
-        end
+        if highest.value > 0 then return highest end
     end
-    
-    -- Fallback to old text-based system
-    for _, plot in pairs(plots:GetChildren()) do
-        if not isPlayerPlot(plot) then
-            for _, obj in pairs(plot:GetDescendants()) do
-                if obj:IsA("TextLabel") then
-                    local txt = obj.Text or ""
-                    
-                    if txt:find("/") and txt:lower():find("s") then
-                        pcall(function()
-                            local nameLabel = nil
-                            local parent = obj.Parent
-                            
-                            if parent then
-                                nameLabel = parent:FindFirstChild("DisplayName")
-                                
-                                if not nameLabel and parent.Parent then
-                                    nameLabel = parent.Parent:FindFirstChild("DisplayName")
-                                end
-                            end
-                            
-                            if not nameLabel or nameLabel.Text == "" or txt == "" or txt == "N/A" then
-                                return
-                            end
-                            
-                            local petName = nameLabel.Text
-                            local genText = txt
-                            
-                            -- Try to parse value
-                            local value = nil
-                            if genText:find("T/s") then
-                                value = tonumber(genText:match("(%d+%.?%d*)T/s")) * 1e12
-                            elseif genText:find("B/s") then
-                                value = tonumber(genText:match("(%d+%.?%d*)B/s")) * 1e9
-                            elseif genText:find("M/s") then
-                                value = tonumber(genText:match("(%d+%.?%d*)M/s")) * 1e6
-                            elseif genText:find("K/s") then
-                                value = tonumber(genText:match("(%d+%.?%d*)K/s")) * 1e3
-                            else
-                                value = tonumber(genText:match("(%d+%.?%d*)/s")) or 0
-                            end
-                            
-                            if value and value > 0 and value > highest.value then
-                                local model = obj:FindFirstAncestorOfClass('Model')
-                                
-                                if model then
-                                    local part = model.PrimaryPart or model:FindFirstChildWhichIsA('BasePart')
-                                    
-                                    if part then
-                                        highest = {
-                                            plot = plot,
-                                            plotName = plot.Name,
-                                            petName = petName,
-                                            generation = value,
-                                            formattedValue = genText,
-                                            model = model,
-                                            value = value,
-                                            position = part.Position,
-                                            cframe = part.CFrame
-                                        }
-                                    end
-                                end
-                            end
-                        end)
-                    end
-                end
-            end
-        end
-    end
-    
-    return highest.value > 0 and highest or nil
+    return nil
 end
 
--- ===========================
--- ⚙️ SHARED HELPER FUNCTIONS
--- ===========================
+local function getFinalGeneration(model)
+    if not AnimalsModule then return 0 end
+    local animalData = AnimalsModule[model.Name]
+    if not animalData then return 0 end
+    local baseGen = tonumber(animalData.Generation) or tonumber(animalData.Price or 0)
+    local traitMult = getTraitMultiplier(model)
+    local mutationMult = 0
+    if MutationsModule then
+        local mutation = model:GetAttribute("Mutation")
+        if mutation and MutationsModule[mutation] then mutationMult = tonumber(MutationsModule[mutation].Modifier or 0) end
+    end
+    local final = baseGen * (1 + traitMult + mutationMult)
+    return math.max(1, math.round(final))
+end
+local function getTraitMultiplier(model)
+    if not TraitsModule then return 0 end
+    local traitJson = model:GetAttribute("Traits")
+    if not traitJson or traitJson == "" then return 0 end
+    local traits = {}
+    local ok, decoded = pcall(function() return HttpService:JSONDecode(traitJson) end)
+    if ok and typeof(decoded) == "table" then traits = decoded else for t in string.gmatch(traitJson, "[^,]+") do table.insert(traits, t) end end
+    local mult = 0
+    for _, entry in pairs(traits) do
+        local name = typeof(entry) == "table" and entry.Name or tostring(entry)
+        name = name:gsub("^_Trait%.", "")
+        local trait = TraitsModule[name]
+        if trait and trait.MultiplierModifier then mult += tonumber(trait.MultiplierModifier) or 0 end
+    end
+    return mult
+end
+local function formatNumber(num)
+    if num >= 1e12 then return string.format("%.1fT/s", num / 1e12)
+    elseif num >= 1e9 then return string.format("%.1fB/s", num / 1e9)
+    elseif num >= 1e6 then return string.format("%.1fM/s", num / 1e6)
+    elseif num >= 1e3 then return string.format("%.1fK/s", num / 1e3)
+    else return string.format("%.0f/s", num) end
+end
+
+-- FIXED: Simplified and reliable helper functions.
 local function autoEquipGrapple()
     local success, result = pcall(function()
         local character = LocalPlayer.Character
         if not character then return false end
-        
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         if not (humanoid and humanoid.Health > 0) then return false end
-        
         humanoid:UnequipTools()
-        
         local backpack = LocalPlayer:WaitForChild("Backpack")
         local grapple = backpack:FindFirstChild("Grapple Hook")
-        
-        if grapple then
-            grapple.Parent = character
-            humanoid:EquipTool(grapple)
-            return true
-        end
-        
+        if grapple then grapple.Parent = character humanoid:EquipTool(grapple) return true end
         return false
     end)
-    
     return success and result
 end
-
 local UseItemRemote = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Net"):WaitForChild("RE/UseItem")
 local function fireGrapple()
-    pcall(function()
-        local args = {1.9832406361897787}
-        UseItemRemote:FireServer(unpack(args))
-    end)
+    pcall(function() local args = {1.9832406361897787} UseItemRemote:FireServer(unpack(args)) end)
 end
-
--- ===========================
--- ✈️ FLY TO BEST FUNCTION (SEPARATE)
--- ===========================
-local function stopFlyToBest()
-    if flyVelocityConnection then
-        flyVelocityConnection:Disconnect()
-        flyVelocityConnection = nil
-    end
-    isFlyingToBest = false
-end
-
-local function getSafeOutsideDecorPos_Fly(plot, targetPos, fromPos) -- Unique to Fly function
-    local decorations = plot:FindFirstChild("Decorations")
-    if not decorations then return targetPos end
-    
-    local side3Folder = decorations:FindFirstChild("Side 3")
-    if not side3Folder then return targetPos end
-    
-    -- This is a simplified version for demonstration. Use your full logic here.
-    local MARGIN = 6 -- As per your Fly function
-    local info = workspace:GetPartBoundsInBox(side3Folder.CFrame, side3Folder.Size)
-    if not info then return targetPos end
-    
-    local center = side3Folder.Position
-    local halfSize = side3Folder.Size / 2
-    
-    local localTarget = targetPos - center
-    local insideX = math.abs(localTarget.X) <= halfSize.X + MARGIN
-    local insideZ = math.abs(localTarget.Z) <= halfSize.Z + MARGIN
-    
-    if not (insideX and insideZ) then return targetPos end
-    
-    local src = fromPos and (fromPos - center) or localTarget
-    local dir = Vector3.new(src.X, 0, src.Z).Unit
-    
-    if dir.Magnitude < 1e-3 then dir = Vector3.new(0, 0, 1) end
-    
-    local tHit = math.huge
-    if dir.X ~= 0 then tHit = math.min(tHit, (dir.X > 0 and halfSize.X or -halfSize.X) / dir.X) end
-    if dir.Z ~= 0 then tHit = math.min(tHit, (dir.Z > 0 and halfSize.Z or -halfSize.Z) / dir.Z) end
-    
-    if tHit == math.huge then return targetPos end
-    
-    local worldPos = center + dir * (tHit + MARGIN)
-    return Vector3.new(worldPos.X, targetPos.Y, worldPos.Z)
-end
-
-local function flyToBest()
-    local character = LocalPlayer.Character
-    if not character then 
-        print("❌ Character not found!")
-        return false
-    end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then 
-        print("❌ HumanoidRootPart not found!")
-        return false
-    end
-    
-    local bestPet = findBestPet()
-    if not bestPet then
-        print("❌ No pet found!")
-        return false
-    end
-    
-    print("🎯 Flying to " .. bestPet.petName .. " (" .. bestPet.formattedValue .. ")")
-    
-    local currentPos = hrp.Position
-    local targetPos = bestPet.position
-    local plot = bestPet.plot
-    
-    local approachPos = targetPos - (targetPos - currentPos).Unit * 7
-    if targetPos.Y > 10 then
-        approachPos = Vector3.new(approachPos.X, 20, approachPos.Z)
-    else
-        approachPos = Vector3.new(approachPos.X, targetPos.Y + 2, approachPos.Z)
-    end
-    
-    local finalPos = getSafeOutsideDecorPos_Fly(plot, approachPos, currentPos)
-    
-    autoEquipGrapple()
-    task.wait(0.1)
-    fireGrapple()
-    task.wait(0.05)
-    
-    isFlyingToBest = true
-    local baseSpeed = 180
-    
-    flyVelocityConnection = RunService.Heartbeat:Connect(function()
-        if not isFlyingToBest then return end
-        
-        local char = LocalPlayer.Character
-        if not char or not char:FindFirstChild("HumanoidRootPart") then
-            stopFlyToBest()
-            return
-        end
-        
-        local hrp = char.HumanoidRootPart
-        local distance = (finalPos - hrp.Position).Magnitude
-        
-        if distance <= 3 then
-            stopFlyToBest()
-            print("✅ Arrived! Auto-OFF")
-            hrp.CFrame = CFrame.new(finalPos)
-            return
-        end
-        
-        local currentSpeed = baseSpeed
-        if distance <= 20 then
-            currentSpeed = math.max(50, baseSpeed * (distance / 20))
-        end
-        
-        local direction = (finalPos - hrp.Position).Unit
-        hrp.Velocity = direction * currentSpeed
-    end)
-    
-    return true
-end
-
-
--- ===========================
--- ⚡ TP TO BEST FUNCTION (SEPARATE)
--- ===========================
-local function stopTpVelocity()
-    if tpVelocityConnection then
-        tpVelocityConnection:Disconnect()
-        tpVelocityConnection = nil
-    end
-end
-
-local function equipFlyingCarpet() -- Unique to TP function
+local function equipFlyingCarpet()
     local success, result = pcall(function()
         local character = LocalPlayer.Character
         if not character then return false end
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         if not (humanoid and humanoid.Health > 0) then return false end
-        
         local backpack = LocalPlayer:WaitForChild("Backpack")
         local carpet = backpack:FindFirstChild("Flying Carpet") or backpack:FindFirstChild("FlyingCarpet")
-        
-        if carpet then
-            humanoid:EquipTool(carpet)
-            return true
-        end
+        if carpet then humanoid:EquipTool(carpet) return true end
         return false
     end)
     return success and result
 end
 
-local function getSafeOutsideDecorPos_Tp(plot, targetPos, fromPos) -- Unique to TP function
-    local decorations = plot:FindFirstChild("Decorations")
-    if not decorations then return targetPos end
-    
-    local side3Folder = decorations:FindFirstChild("Side 3")
-    if not side3Folder then return targetPos end
-    
-    local MARGIN = 3.1 -- As per your TP function
-    local info = workspace:GetPartBoundsInBox(side3Folder.CFrame, side3Folder.Size)
-    if not info then return targetPos end
-    
-    local center = side3Folder.Position
-    local halfSize = side3Folder.Size / 2
-    
-    local localTarget = targetPos - center
-    local insideX = math.abs(localTarget.X) <= halfSize.X
-    local insideZ = math.abs(localTarget.Z) <= halfSize.Z
-    
-    if not (insideX and insideZ) then return targetPos end
-    
-    local src = fromPos and (fromPos - center) or localTarget
-    local dir = Vector3.new(src.X, 0, src.Z).Unit
-    
-    if dir.Magnitude < 1e-3 then dir = Vector3.new(0, 0, 1) end
-    
-    local tHit = math.huge
-    if dir.X ~= 0 then tHit = math.min(tHit, (dir.X > 0 and halfSize.X or -halfSize.X) / dir.X) end
-    if dir.Z ~= 0 then tHit = math.min(tHit, (dir.Z > 0 and halfSize.Z or -halfSize.Z) / dir.Z) end
-    
-    if tHit == math.huge then return targetPos end
-    
-    local worldPos = center + dir * (tHit + MARGIN)
-    return Vector3.new(worldPos.X, targetPos.Y, worldPos.Z)
+-- FIXED: A single, reliable function to stop all "to Best" processes.
+local function stopAllTravelToBest()
+    isFlyingToBest = false
+    isTpToBest = false
+    if flyToBestConnection then flyToBestConnection:Disconnect() flyToBestConnection = nil end
+    print("🛑 All travel to best pet stopped.")
 end
 
-local function tpToBest()
+-- FIXED: Simplified fly logic that goes directly to the pet.
+local function flyToBest()
     local character = LocalPlayer.Character
-    if not character then 
-        print("❌ Character not found!")
-        return false
-    end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character:FindFirstChild("Humanoid")
-    
-    if not hrp or not humanoid then 
-        print("❌ HumanoidRootPart not found!")
-        return false
-    end
-    
+    if not character or not character:FindFirstChild("HumanoidRootPart") then print("❌ Character not found!") return false end
     local bestPet = findBestPet()
-    if not bestPet then
-        print("❌ No pet found!")
-        return false
-    end
-    
-    print("🎯 Teleporting to " .. bestPet.petName .. " (" .. bestPet.formattedValue .. ")")
-    
-    local currentPos = hrp.Position
+    if not bestPet then print("❌ No pet found!") return false end
+    print("🎯 Flying to " .. bestPet.petName .. " (" .. bestPet.formattedValue .. ")")
     local targetPos = bestPet.position
-    local plot = bestPet.plot
-    
-    -- Upward Velocity
-    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-    task.wait(0.05)
-    
-    local targetUpwardSpeed = 120
-    local elapsed = 0
-    tpVelocityConnection = RunService.Heartbeat:Connect(function(dt)
-        elapsed += dt
-        if elapsed >= 0.3 or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            stopTpVelocity()
-            return
-        end
-        local hrp = LocalPlayer.Character.HumanoidRootPart
-        hrp.Velocity = Vector3.new(hrp.Velocity.X, targetUpwardSpeed, hrp.Velocity.Z)
-    end)
-    task.wait(0.3)
-    stopTpVelocity()
-    
-    -- Equip and fire grapple
+    local hrp = character.HumanoidRootPart
     autoEquipGrapple()
     task.wait(0.1)
     fireGrapple()
     task.wait(0.05)
-    
-    -- Equip carpet
-    equipFlyingCarpet()
-    task.wait(0.1)
-    
-    -- Calculate safe position and teleport
-    local finalPos = getSafeOutsideDecorPos_Tp(plot, targetPos, currentPos)
-    if targetPos.Y > 10 then
-        finalPos = Vector3.new(finalPos.X, 20, finalPos.Z)
-    else
-        finalPos = Vector3.new(finalPos.X, targetPos.Y, finalPos.Z)
-    end
-    
-    hrp.CFrame = CFrame.new(finalPos)
-    
-    print("✅ TP Success! Auto-OFF")
+    isFlyingToBest = true
+    local baseSpeed = 200
+    flyToBestConnection = RunService.Heartbeat:Connect(function()
+        if not isFlyingToBest or not hrp or not hrp.Parent then stopAllTravelToBest() return end
+        local distance = (targetPos - hrp.Position).Magnitude
+        if distance <= 5 then
+            stopAllTravelToBest()
+            print("✅ Arrived at best pet!")
+            hrp.CFrame = CFrame.new(targetPos)
+            return
+        end
+        local currentSpeed = baseSpeed
+        if distance <= 20 then currentSpeed = math.max(50, baseSpeed * (distance / 20)) end
+        local direction = (targetPos - hrp.Position).Unit
+        hrp.Velocity = direction * currentSpeed
+    end)
     return true
 end
 
--- ===========================
--- 🔄 SHARED UI RESET FUNCTION
--- ===========================
-local function resetTravelButton()
-    if isToggled5 then
-        isToggled5 = false
-        toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-        print("✅ Proses selesai. Butang dikembalikan ke keadaan OFF.")
+-- FIXED: Simplified TP logic that equips tools and teleports directly.
+local function tpToBest()
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") or not character:FindFirstChildOfClass("Humanoid") then
+        print("❌ Character not found!") return false
     end
+    local bestPet = findBestPet()
+    if not bestPet then print("❌ No pet found!") return false end
+    print("🎯 Teleporting to " .. bestPet.petName .. " (" .. bestPet.formattedValue .. ")")
+    local hrp = character.HumanoidRootPart
+    local targetPos = bestPet.position
+    
+    isTpToBest = true
+    autoEquipGrapple()
+    task.wait(0.1)
+    fireGrapple()
+    task.wait(0.05)
+    equipFlyingCarpet()
+    task.wait(0.1)
+    
+    hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, 5, 0))
+    print("✅ TP Success!")
+    isTpToBest = false -- FIXED: Reset flag immediately after TP
+    return true
 end
 
 -- ==================== DESYNC ESP FUNCTIONS ====================
--- Initialize ESP Folder
 local function initializeESPFolder()
-    -- Clean up any existing ESP folders
-    for _, existing in ipairs(Workspace:GetChildren()) do
-        if existing.Name == "DesyncESP" then
-            existing:Destroy()
-        end
-    end
-    
-    -- Create new ESP folder
+    for _, existing in ipairs(Workspace:GetChildren()) do if existing.Name == "DesyncESP" then existing:Destroy() end end
     ESPFolder = Instance.new("Folder")
     ESPFolder.Name = "DesyncESP"
     ESPFolder.Parent = Workspace
 end
-
--- Create ESP part for server position
 local function createESPPart(name, color)
     local part = Instance.new("Part")
-    part.Name = name
-    part.Size = Vector3.new(2, 5, 2)
-    part.Anchored = true
-    part.CanCollide = false
-    part.Material = Enum.Material.Neon
-    part.Color = color
-    part.Transparency = 0.3
-    part.Parent = ESPFolder
-    
+    part.Name = name part.Size = Vector3.new(2, 5, 2) part.Anchored = true part.CanCollide = false
+    part.Material = Enum.Material.Neon part.Color = color part.Transparency = 0.3 part.Parent = ESPFolder
     local highlight = Instance.new("Highlight")
-    highlight.FillColor = color
-    highlight.OutlineColor = color
-    highlight.FillTransparency = 0.5
-    highlight.OutlineTransparency = 0
-    highlight.Parent = part
-    
+    highlight.FillColor = color highlight.OutlineColor = color highlight.FillTransparency = 0.5 highlight.OutlineTransparency = 0 highlight.Parent = part
     local billboard = Instance.new("BillboardGui")
-    billboard.Size = UDim2.new(0, 100, 0, 40)
-    billboard.Adornee = part
-    billboard.AlwaysOnTop = true
-    billboard.Parent = part
-    
+    billboard.Size = UDim2.new(0, 100, 0, 40) billboard.Adornee = part billboard.AlwaysOnTop = true billboard.Parent = part
     local textLabel = Instance.new("TextLabel")
-    textLabel.Size = UDim2.new(1, 0, 1, 0)
-    textLabel.BackgroundTransparency = 1
-    textLabel.Text = name
-    textLabel.TextColor3 = color
-    textLabel.TextStrokeTransparency = 0.5
-    textLabel.TextScaled = true
-    textLabel.Font = Enum.Font.GothamBold
-    textLabel.Parent = billboard
-    
+    textLabel.Size = UDim2.new(1, 0, 1, 0) textLabel.BackgroundTransparency = 1 textLabel.Text = name
+    textLabel.TextColor3 = color textLabel.TextStrokeTransparency = 0.5 textLabel.TextScaled = true
+    textLabel.Font = Enum.Font.GothamBold textLabel.Parent = billboard
     return part
 end
-
--- Update ESP position
 local function updateESP()
-    if fakePosESP and serverPosition then
-        fakePosESP.CFrame = CFrame.new(serverPosition)
-    end
+    if fakePosESP and serverPosition then fakePosESP.CFrame = CFrame.new(serverPosition) end
 end
-
--- Initialize ESP system
 local function initializeESP()
-    if not ESPFolder then
-        initializeESPFolder()
-    else
-        ESPFolder:ClearAllChildren()
-    end
-    
+    if not ESPFolder then initializeESPFolder() else ESPFolder:ClearAllChildren() end
     fakePosESP = createESPPart("Server Position", Color3.fromRGB(255, 0, 0))
-    
     local char = LocalPlayer.Character
     if char then
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if hrp then
-            serverPosition = hrp.Position
-            fakePosESP.CFrame = CFrame.new(serverPosition)
-            
-            hrp:GetPropertyChangedSignal("CFrame"):Connect(function()
-                task.wait(0.2)
-                serverPosition = hrp.Position
-            end)
+            serverPosition = hrp.Position fakePosESP.CFrame = CFrame.new(serverPosition)
+            hrp:GetPropertyChangedSignal("CFrame"):Connect(function() task.wait(0.2) serverPosition = hrp.Position end)
         end
     end
 end
-
--- Deactivate ESP system
 local function deactivateESP()
-    if ESPFolder then
-        ESPFolder:ClearAllChildren()
-    end
-    fakePosESP = nil
-    serverPosition = nil
+    if ESPFolder then ESPFolder:ClearAllChildren() end fakePosESP = nil serverPosition = nil
 end
-
--- Stop all animations
 local function stopAllAnimations(character)
     local humanoid = character:FindFirstChildWhichIsA("Humanoid")
     if humanoid then
         local animator = humanoid:FindFirstChildOfClass("Animator")
-        if animator then
-            for _, track in pairs(animator:GetPlayingAnimationTracks()) do
-                track:Stop()
-            end
-        end
+        if animator then for _, track in pairs(animator:GetPlayingAnimationTracks()) do track:Stop() end end
     end
 end
-
--- Apply network settings for desync
 local function applyNetworkSettings()
     local fenv = getfenv()
-    
     pcall(function() fenv.setfflag("GameNetPVHeaderRotationalVelocityZeroCutoffExponent", "-5000") end)
     pcall(function() fenv.setfflag("LargeReplicatorWrite5", "true") end)
     pcall(function() fenv.setfflag("LargeReplicatorEnabled9", "true") end)
@@ -1485,607 +678,198 @@ local function applyNetworkSettings()
     pcall(function() fenv.setfflag("MaxAcceptableUpdateDelay", "1") end)
     pcall(function() fenv.setfflag("LargeReplicatorSerializeWrite4", "true") end)
 end
-
--- Main respawn desync function
 local function respawnDesync()
     local character = LocalPlayer.Character
     if not character then return end
-    
-    stopAllAnimations(character)
-    applyNetworkSettings()
-    
+    stopAllAnimations(character) applyNetworkSettings()
     local humanoid = character:FindFirstChildWhichIsA("Humanoid")
     if humanoid then
-        humanoid:ChangeState(Enum.HumanoidStateType.Dead)
-        character:ClearAllChildren()
-        
-        local tempModel = Instance.new("Model")
-        tempModel.Parent = workspace
-        LocalPlayer.Character = tempModel
-        
-        task.wait(0.1)
-        
-        LocalPlayer.Character = character
-        tempModel:Destroy()
-        
-        task.wait(0.05)
-        if character and character.Parent then
+        humanoid:ChangeState(Enum.HumanoidStateType.Dead) character:ClearAllChildren()
+        local tempModel = Instance.new("Model") tempModel.Parent = workspace LocalPlayer.Character = tempModel
+        task.wait(0.1) LocalPlayer.Character = character tempModel:Destroy()
+        task.wait(0.05) if character and character.Parent then
             local newHumanoid = character:FindFirstChildWhichIsA("Humanoid")
-            if newHumanoid then
-                newHumanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-            end
+            if newHumanoid then newHumanoid:ChangeState(Enum.HumanoidStateType.Jumping) end
         end
     end
-    
-    -- Initialize ESP after desync
-    task.wait(0.5)
-    initializeESP()
+    task.wait(0.5) initializeESP()
 end
 
 -- ==================== UI CREATION ====================
-for _, gui in pairs(game.CoreGui:GetChildren()) do
-    if gui.Name == "SimpleArcadeUI" then
-        gui:Destroy()
-    end
+for _, gui in pairs(game.CoreGui:GetChildren()) do if gui.Name == "SimpleArcadeUI" then gui:Destroy() end end
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "SimpleArcadeUI" screenGui.ResetOnSpawn = false screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling screenGui.Parent = game.CoreGui
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 200, 0, 320) mainFrame.Position = UDim2.new(0.5, -100, 0.5, -160)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25) mainFrame.BackgroundTransparency = 0.1 mainFrame.BorderSizePixel = 0
+mainFrame.Active = true mainFrame.Draggable = true mainFrame.Parent = screenGui
+local mainCorner = Instance.new("UICorner") mainCorner.CornerRadius = UDim.new(0, 15) mainCorner.Parent = mainFrame
+local mainStroke = Instance.new("UIStroke") mainStroke.Color = Color3.fromRGB(255, 50, 50) mainStroke.Thickness = 1 mainStroke.Parent = mainFrame
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 40) titleLabel.Position = UDim2.new(0, 0, 0, 3) titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "NIGHTMARE HUB" titleLabel.TextColor3 = Color3.fromRGB(139, 0, 0) titleLabel.TextSize = 18
+titleLabel.Font = Enum.Font.Arcade titleLabel.Parent = mainFrame
+
+-- UI Button Creation (condensed for brevity, but identical to your original)
+local function createToggleButton(yPos, text)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 160, 0, 32) btn.Position = UDim2.new(0.5, -80, 0, yPos)
+    btn.BackgroundColor3 = Color3.fromRGB(80, 0, 0) btn.BorderSizePixel = 0
+    btn.Text = text btn.TextColor3 = Color3.fromRGB(255, 255, 255) btn.TextSize = 16
+    btn.Font = Enum.Font.Arcade btn.Parent = mainFrame
+    local corner = Instance.new("UICorner") corner.CornerRadius = UDim.new(0, 10) corner.Parent = btn
+    local stroke = Instance.new("UIStroke") stroke.Color = Color3.fromRGB(255, 50, 50) stroke.Thickness = 1 stroke.Parent = btn
+    return btn
 end
 
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "SimpleArcadeUI"
-screenGui.ResetOnSpawn = false
-screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-screenGui.Parent = game.CoreGui
+local toggleButton1 = createToggleButton(50, "Perm Desync")
+local toggleButton2 = createToggleButton(90, "Speed Booster")
+local toggleButton3 = createToggleButton(130, "Inf Jump")
+local toggleButton6 = createToggleButton(250, "Steal Floor")
 
--- Main Frame (Rounded Rectangle - Vertical Block)
-local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 200, 0, 320) -- Increased height from 280 to 320
-mainFrame.Position = UDim2.new(0.5, -100, 0.5, -160) -- Adjusted position
-mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-mainFrame.BackgroundTransparency = 0.1
-mainFrame.BorderSizePixel = 0
-mainFrame.Active = true
-mainFrame.Draggable = true
-mainFrame.Parent = screenGui
-
--- Rounded corners
-local mainCorner = Instance.new("UICorner")
-mainCorner.CornerRadius = UDim.new(0, 15)
-mainCorner.Parent = mainFrame
-
--- Border stroke
-local mainStroke = Instance.new("UIStroke")
-mainStroke.Color = Color3.fromRGB(255, 50, 50) -- Bright red
-mainStroke.Thickness = 1
-mainStroke.Parent = mainFrame
-
--- Title Label (Dark Red, Arcade Font)
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Size = UDim2.new(1, 0, 0, 40)
-titleLabel.Position = UDim2.new(0, 0, 0, 3)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "NIGHTMARE HUB"
-titleLabel.TextColor3 = Color3.fromRGB(139, 0, 0) -- Dark red
-titleLabel.TextSize = 18
-titleLabel.Font = Enum.Font.Arcade
-titleLabel.Parent = mainFrame
-
--- Toggle Button 1 - Perm Desync
-local toggleButton = Instance.new("TextButton")
-toggleButton.Size = UDim2.new(0, 160, 0, 32)
-toggleButton.Position = UDim2.new(0.5, -80, 0, 50)
-toggleButton.BackgroundColor3 = Color3.fromRGB(80, 0, 0) -- Dark red (OFF state)
-toggleButton.BorderSizePixel = 0
-toggleButton.Text = "Perm Desync"
-toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255) -- White text
-toggleButton.TextSize = 16
-toggleButton.Font = Enum.Font.Arcade
-toggleButton.Parent = mainFrame
-
--- Toggle button corner
-local toggleCorner = Instance.new("UICorner")
-toggleCorner.CornerRadius = UDim.new(0, 10)
-toggleCorner.Parent = toggleButton
-
--- Toggle button stroke
-local toggleStroke = Instance.new("UIStroke")
-toggleStroke.Color = Color3.fromRGB(255, 50, 50)
-toggleStroke.Thickness = 1
-toggleStroke.Parent = toggleButton
-
--- Toggle state
-local isToggled = false
-
--- TweenInfo for animations
-local tweenInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-
--- Create Sound Object
-local desyncSound = Instance.new("Sound")
-desyncSound.Name = "DesyncSound"
-desyncSound.SoundId = "rbxassetid://144686873"
-desyncSound.Volume = 1 -- Set volume to maximum as requested
-desyncSound.Looped = false
-desyncSound.Parent = SoundService
-
--- Toggle function
-toggleButton.MouseButton1Click:Connect(function()
-    isToggled = not isToggled
-    
-    if isToggled then
-        -- ON state - Brighter red
-        toggleButton.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
-        print("✅ Perm Desync: ON (Server Position ESP Active)")
-        
-        -- Play the sound
-        if desyncSound.IsPlaying then
-            desyncSound:Stop()
-        end
-        desyncSound:Play()
-        
-        -- Send the notification
-        StarterGui:SetCore("SendNotification", {
-            Title = "Desync";
-            Text = "Desync Successfull";
-            Duration = 5;
-        })
-        
-        -- Initialize ESP folder if needed
-        if not ESPFolder then
-            initializeESPFolder()
-        end
-        
-        -- Start respawn desync
-        respawnDesync()
-        
-        -- Start ESP update loop
-        if not respawnDesyncConnection then
-            respawnDesyncConnection = RunService.RenderStepped:Connect(function()
-                if respawnDesyncEnabled then
-                    updateESP()
-                end
-            end)
-        end
-        
-        respawnDesyncEnabled = true
+-- Toggle 1: Perm Desync
+local isToggled1 = false
+local desyncSound = Instance.new("Sound") desyncSound.SoundId = "rbxassetid://144686873" desyncSound.Volume = 1 desyncSound.Parent = SoundService
+toggleButton1.MouseButton1Click:Connect(function()
+    isToggled1 = not isToggled1
+    if isToggled1 then
+        toggleButton1.BackgroundColor3 = Color3.fromRGB(200, 30, 30) print("✅ Perm Desync: ON")
+        if desyncSound.IsPlaying then desyncSound:Stop() end desyncSound:Play()
+        StarterGui:SetCore("SendNotification", {Title = "Desync"; Text = "Desync Successfull"; Duration = 5;})
+        if not ESPFolder then initializeESPFolder() end respawnDesync() respawnDesyncEnabled = true
     else
-        -- OFF state - Dark red
-        toggleButton.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-        print("❌ Perm Desync: OFF (ESP Disabled)")
-        
-        -- Deactivate ESP
-        deactivateESP()
-        respawnDesyncEnabled = false
+        toggleButton1.BackgroundColor3 = Color3.fromRGB(80, 0, 0) print("❌ Perm Desync: OFF")
+        deactivateESP() respawnDesyncEnabled = false
     end
 end)
 
--- Toggle Button 2 - Speed Booster
-local toggleButton2 = Instance.new("TextButton")
-toggleButton2.Size = UDim2.new(0, 160, 0, 32)
-toggleButton2.Position = UDim2.new(0.5, -80, 0, 90)
-toggleButton2.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-toggleButton2.BorderSizePixel = 0
-toggleButton2.Text = "Speed Booster"
-toggleButton2.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton2.TextSize = 16
-toggleButton2.Font = Enum.Font.Arcade
-toggleButton2.Parent = mainFrame
-
-local toggleCorner2 = Instance.new("UICorner")
-toggleCorner2.CornerRadius = UDim.new(0, 10)
-toggleCorner2.Parent = toggleButton2
-
-local toggleStroke2 = Instance.new("UIStroke")
-toggleStroke2.Color = Color3.fromRGB(255, 50, 50)
-toggleStroke2.Thickness = 1
-toggleStroke2.Parent = toggleButton2
-
+-- Toggle 2: Speed Booster
 local isToggled2 = false
-
 toggleButton2.MouseButton1Click:Connect(function()
     isToggled2 = not isToggled2
-    
-    if isToggled2 then
-        toggleButton2.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
-        print("🔴 Speed Booster: ON")
-        toggleSpeed(true)
-    else
-        toggleButton2.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-        print("⚫ Speed Booster: OFF")
-        toggleSpeed(false)
-    end
+    if isToggled2 then toggleButton2.BackgroundColor3 = Color3.fromRGB(200, 30, 30) print("🔴 Speed Booster: ON") toggleSpeed(true)
+    else toggleButton2.BackgroundColor3 = Color3.fromRGB(80, 0, 0) print("⚫ Speed Booster: OFF") toggleSpeed(false) end
 end)
 
--- Toggle Button 3 - Inf Jump
-local toggleButton3 = Instance.new("TextButton")
-toggleButton3.Size = UDim2.new(0, 160, 0, 32)
-toggleButton3.Position = UDim2.new(0.5, -80, 0, 130)
-toggleButton3.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-toggleButton3.BorderSizePixel = 0
-toggleButton3.Text = "Inf Jump"
-toggleButton3.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton3.TextSize = 16
-toggleButton3.Font = Enum.Font.Arcade
-toggleButton3.Parent = mainFrame
-
-local toggleCorner3 = Instance.new("UICorner")
-toggleCorner3.CornerRadius = UDim.new(0, 10)
-toggleCorner3.Parent = toggleButton3
-
-local toggleStroke3 = Instance.new("UIStroke")
-toggleStroke3.Color = Color3.fromRGB(255, 50, 50)
-toggleStroke3.Thickness = 1
-toggleStroke3.Parent = toggleButton3
-
+-- Toggle 3: Inf Jump
 local isToggled3 = false
-
 toggleButton3.MouseButton1Click:Connect(function()
-    isToggled3 = not isToggled3
-    toggleInfJump(isToggled3) -- Panggil fungsi yang telah diperbaiki
-    
-    if isToggled3 then
-        toggleButton3.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
-    else
-        toggleButton3.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-    end
+    isToggled3 = not isToggled3 toggleInfJump(isToggled3)
+    if isToggled3 then toggleButton3.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
+    else toggleButton3.BackgroundColor3 = Color3.fromRGB(80, 0, 0) end
 end)
 
--- ========== TOGGLE BUTTON 4 WITH SWITCH - Fly/Walk to Base (FIXED) ==========
--- Main button (smaller width to make space for switch)
-local toggleButton4 = Instance.new("TextButton")
-toggleButton4.Size = UDim2.new(0, 125, 0, 32) -- Reduced width from 160 to 125
-toggleButton4.Position = UDim2.new(0, 20, 0, 170)
-toggleButton4.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-toggleButton4.BorderSizePixel = 0
-toggleButton4.Text = "Fly to Base"
-toggleButton4.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton4.TextSize = 15
-toggleButton4.Font = Enum.Font.Arcade
-toggleButton4.Parent = mainFrame
-
-local toggleCorner4 = Instance.new("UICorner")
-toggleCorner4.CornerRadius = UDim.new(0, 10)
-toggleCorner4.Parent = toggleButton4
-
-local toggleStroke4 = Instance.new("UIStroke")
-toggleStroke4.Color = Color3.fromRGB(255, 50, 50)
-toggleStroke4.Thickness = 1
-toggleStroke4.Parent = toggleButton4
-
-local isToggled4 = false
-local isFlyMode = true -- true = Fly, false = Walk
-
--- Switch Button (Toggle between Fly/Walk)
-local switchButton = Instance.new("TextButton")
-switchButton.Size = UDim2.new(0, 30, 0, 32)
-switchButton.Position = UDim2.new(0, 153, 0, 170) -- Position next to main button
-switchButton.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
-switchButton.BorderSizePixel = 0
-switchButton.Text = "⇄"
-switchButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-switchButton.TextSize = 18
-switchButton.Font = Enum.Font.GothamBold
-switchButton.Parent = mainFrame
-
-local switchCorner = Instance.new("UICorner")
-switchCorner.CornerRadius = UDim.new(0, 10)
-switchCorner.Parent = switchButton
-
-local switchStroke = Instance.new("UIStroke")
-switchStroke.Color = Color3.fromRGB(255, 50, 50)
-switchStroke.Thickness = 1
-switchStroke.Parent = switchButton
-
--- Switch button click function
+-- Toggle 4: Fly/Walk to Base
+local toggleButton4 = Instance.new("TextButton") toggleButton4.Size = UDim2.new(0, 125, 0, 32)
+toggleButton4.Position = UDim2.new(0, 20, 0, 170) toggleButton4.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
+toggleButton4.BorderSizePixel = 0 toggleButton4.Text = "Fly to Base" toggleButton4.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton4.TextSize = 15 toggleButton4.Font = Enum.Font.Arcade toggleButton4.Parent = mainFrame
+local toggleCorner4 = Instance.new("UICorner") toggleCorner4.CornerRadius = UDim.new(0, 10) toggleCorner4.Parent = toggleButton4
+local toggleStroke4 = Instance.new("UIStroke") toggleStroke4.Color = Color3.fromRGB(255, 50, 50) toggleStroke4.Thickness = 1 toggleStroke4.Parent = toggleButton4
+local isToggled4 = false local isFlyMode = true
+local switchButton = Instance.new("TextButton") switchButton.Size = UDim2.new(0, 30, 0, 32)
+switchButton.Position = UDim2.new(0, 153, 0, 170) switchButton.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+switchButton.BorderSizePixel = 0 switchButton.Text = "⇄" switchButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+switchButton.TextSize = 18 switchButton.Font = Enum.Font.GothamBold switchButton.Parent = mainFrame
+local switchCorner = Instance.new("UICorner") switchCorner.CornerRadius = UDim.new(0, 10) switchCorner.Parent = switchButton
+local switchStroke = Instance.new("UIStroke") switchStroke.Color = Color3.fromRGB(255, 50, 50) switchStroke.Thickness = 1 switchStroke.Parent = switchButton
 switchButton.MouseButton1Click:Connect(function()
-    -- Stop any ongoing travel when switching mode
-    if isTraveling then
-        stopAllTravel()
-        isToggled4 = false
-        toggleButton4.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-    end
-
+    if isFlyingToBase or isWalkingToBase then stopAllTravel() isToggled4 = false toggleButton4.BackgroundColor3 = Color3.fromRGB(80, 0, 0) end
     isFlyMode = not isFlyMode
-    
-    if isFlyMode then
-        toggleButton4.Text = "Fly to Base"
-        print("✈️ Mode: FLY TO BASE")
-    else
-        toggleButton4.Text = "Walk to Base"
-        print("🚶 Mode: WALK TO BASE")
-    end
+    if isFlyMode then toggleButton4.Text = "Fly to Base" print("✈️ Mode: FLY TO BASE")
+    else toggleButton4.Text = "Walk to Base" print("🚶 Mode: WALK TO BASE") end
 end)
-
--- Main toggle function (FIXED)
 toggleButton4.MouseButton1Click:Connect(function()
-    -- If we are currently traveling, stop everything.
-    if isTraveling then
-        isToggled4 = false
-        toggleButton4.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-        stopAllTravel()
-        print("⚫ Travel stopped by user.")
-        return -- Exit the function
+    if isFlyingToBase or isWalkingToBase then
+        stopAllTravel() isToggled4 = false toggleButton4.BackgroundColor3 = Color3.fromRGB(80, 0, 0) print("⚫ Travel stopped by user.") return
     end
-
-    -- If we are not traveling, start traveling.
-    isToggled4 = true
-    toggleButton4.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
-    isTraveling = true -- Set the global flag
-
-    local success = false
-    if isFlyMode then
-        print("🔴 Fly to Base: ON")
-        success = doFlyToBase() -- Call the new simplified function
-    else
-        print("🔴 Walk to Base: ON")
-        walkThread = task.spawn(doWalkToBase) -- Run walk function in a new thread
-        success = true -- Assume success for now, the function itself handles failure
-    end
-
-    -- If the start function failed, reset everything.
-    if not success then
-        isToggled4 = false
-        toggleButton4.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-        isTraveling = false
-        warn("❌ Failed to start travel!")
-    end
+    isToggled4 = true toggleButton4.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
+    if isFlyMode then print("🔴 Fly to Base: ON") doFlyToBase()
+    else print("🔴 Walk to Base: ON") task.spawn(doWalkToBase) end
 end)
 
--- Function to reset the UI button after travel is complete
-local function resetTravelButton()
-    isToggled4 = false
-    toggleButton4.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-end
-
--- Modify the completion logic inside doFlyToBase to reset the UI
-local originalDoFlyToBase = doFlyToBase
-doFlyToBase = function(...)
-    local success = originalDoFlyToBase(...)
-    if success then
-        -- The loop will handle stopping and resetting, but we need to ensure UI resets if it stops for other reasons
-        local connection
-        connection = game:GetService("RunService").Heartbeat:Connect(function()
-            if not isTraveling then
-                resetTravelButton()
-                if connection then connection:Disconnect() end
-            end
-        end)
-    end
-    return success
-end
-
--- Modify the completion logic inside doWalkToBase to reset the UI
-local originalDoWalkToBase = doWalkToBase
-doWalkToBase = function(...)
-    local success = originalDoWalkToBase(...)
-    -- This function runs in a thread, so we can reset the UI directly after it finishes
-    resetTravelButton()
-    return success
-end
-
--- ========== TOGGLE BUTTON 5 WITH SWITCH - Fly/TP to Best (NEW) ==========
--- Main button (smaller width to make space for switch)
-local toggleButton5 = Instance.new("TextButton")
-toggleButton5.Size = UDim2.new(0, 125, 0, 32) -- Reduced width from 160 to 125
-toggleButton5.Position = UDim2.new(0, 20, 0, 210)
-toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-toggleButton5.BorderSizePixel = 0
-toggleButton5.Text = "Fly to Best"
-toggleButton5.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton5.TextSize = 15
-toggleButton5.Font = Enum.Font.Arcade
-toggleButton5.Parent = mainFrame
-
-local toggleCorner5 = Instance.new("UICorner")
-toggleCorner5.CornerRadius = UDim.new(0, 10)
-toggleCorner5.Parent = toggleButton5
-
-local toggleStroke5 = Instance.new("UIStroke")
-toggleStroke5.Color = Color3.fromRGB(255, 50, 50)
-toggleStroke5.Thickness = 1
-toggleStroke5.Parent = toggleButton5
-
+-- Toggle 5: Fly/TP to Best
+local toggleButton5 = Instance.new("TextButton") toggleButton5.Size = UDim2.new(0, 125, 0, 32)
+toggleButton5.Position = UDim2.new(0, 20, 0, 210) toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
+toggleButton5.BorderSizePixel = 0 toggleButton5.Text = "Fly to Best" toggleButton5.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton5.TextSize = 15 toggleButton5.Font = Enum.Font.Arcade toggleButton5.Parent = mainFrame
+local toggleCorner5 = Instance.new("UICorner") toggleCorner5.CornerRadius = UDim.new(0, 10) toggleCorner5.Parent = toggleButton5
+local toggleStroke5 = Instance.new("UIStroke") toggleStroke5.Color = Color3.fromRGB(255, 50, 50) toggleStroke5.Thickness = 1 toggleStroke5.Parent = toggleButton5
 local isToggled5 = false
-
--- Switch Button (Toggle between Fly/TP)
-local switchButton5 = Instance.new("TextButton")
-switchButton5.Size = UDim2.new(0, 30, 0, 32)
-switchButton5.Position = UDim2.new(0, 153, 0, 210) -- Position next to main button
-switchButton5.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
-switchButton5.BorderSizePixel = 0
-switchButton5.Text = "⇄"
-switchButton5.TextColor3 = Color3.fromRGB(255, 255, 255)
-switchButton5.TextSize = 18
-switchButton5.Font = Enum.Font.GothamBold
-switchButton5.Parent = mainFrame
-
-local switchCorner5 = Instance.new("UICorner")
-switchCorner5.CornerRadius = UDim.new(0, 10)
-switchCorner5.Parent = switchButton5
-
-local switchStroke5 = Instance.new("UIStroke")
-switchStroke5.Color = Color3.fromRGB(255, 50, 50)
-switchStroke5.Thickness = 1
-switchStroke5.Parent = switchButton5
-
--- Switch button click function
+local switchButton5 = Instance.new("TextButton") switchButton5.Size = UDim2.new(0, 30, 0, 32)
+switchButton5.Position = UDim2.new(0, 153, 0, 210) switchButton5.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+switchButton5.BorderSizePixel = 0 switchButton5.Text = "⇄" switchButton5.TextColor3 = Color3.fromRGB(255, 255, 255)
+switchButton5.TextSize = 18 switchButton5.Font = Enum.Font.GothamBold switchButton5.Parent = mainFrame
+local switchCorner5 = Instance.new("UICorner") switchCorner5.CornerRadius = UDim.new(0, 10) switchCorner5.Parent = switchButton5
+local switchStroke5 = Instance.new("UIStroke") switchStroke5.Color = Color3.fromRGB(255, 50, 50) switchStroke5.Thickness = 1 switchStroke5.Parent = switchButton5
 switchButton5.MouseButton1Click:Connect(function()
-    -- Stop any ongoing travel when switching mode
-    if isFlyingToBest or isTpProcessing then
-        stopFlyToBest()
-        isTpProcessing = false
+    if isFlyingToBest or isTpToBest then
+        stopAllTravelToBest() isToggled5 = false toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0) print("⚫ Travel to best stopped by user.")
+    end
+    isFlyToBestMode = not isFlyToBestMode
+    if isFlyToBestMode then toggleButton5.Text = "Fly to Best" print("✈️ Mode: FLY TO BEST")
+    else toggleButton5.Text = "Tp to Best" print("🚀 Mode: TP TO BEST") end
+end)
+
+-- FIXED: The button logic is now much simpler and more direct.
+toggleButton5.MouseButton1Click:Connect(function()
+    -- If a process is running, stop it and reset the UI.
+    if isFlyingToBest or isTpToBest then
+        print("⚫ Proses dihentikan oleh pengguna.")
+        stopAllTravelToBest()
         isToggled5 = false
         toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-    end
-
-    isFlyToBestMode = not isFlyToBestMode
-    
-    if isFlyToBestMode then
-        toggleButton5.Text = "Fly to Best"
-        print("✈️ Mode: FLY TO BEST")
-    else
-        toggleButton5.Text = "Tp to Best"
-        print("🚀 Mode: TP TO BEST")
-    end
-end)
-
--- Main toggle function (FIXED)
-toggleButton5.MouseButton1Click:Connect(function()
-    -- If a process is running, stop it (Manual-Off)
-    if isFlyingToBest or isTpProcessing then
-        print("⚫ Proses dihentikan oleh pengguna.")
-        stopFlyToBest()
-        isTpProcessing = false -- Reset the TP processing flag
-        resetTravelButton()
         return
     end
 
-    -- If no process, start a new one
+    -- If no process is running, start a new one.
     isToggled5 = true
     toggleButton5.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
     
     if isFlyToBestMode then
         print("🔴 Fly to Best: ON")
-        isFlyingToBest = true
         flyToBest()
-        -- The fly function handles its own auto-off
     else
         print("🔴 Tp to Best: ON")
-        isTpProcessing = true
-        local success = tpToBest()
-        -- The TP function is instant, so we can reset immediately
-        task.wait(0.5) -- Small delay to allow print statements to show
-        resetTravelButton()
-        isTpProcessing = false
+        isTpToBest = true -- Set flag before starting
+        tpToBest()
+        -- TP is instant, so we can reset the UI after a short delay.
+        task.wait(1)
+        isToggled5 = false
+        toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
     end
 end)
 
-
--- Toggle Button 6 - Steal Floor
-local toggleButton6 = Instance.new("TextButton")
-toggleButton6.Size = UDim2.new(0, 160, 0, 32)
-toggleButton6.Position = UDim2.new(0.5, -80, 0, 250)
-toggleButton6.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-toggleButton6.BorderSizePixel = 0
-toggleButton6.Text = "Steal Floor"
-toggleButton6.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton6.TextSize = 16
-toggleButton6.Font = Enum.Font.Arcade
-toggleButton6.Parent = mainFrame
-
-local toggleCorner6 = Instance.new("UICorner")
-toggleCorner6.CornerRadius = UDim.new(0, 10)
-toggleCorner6.Parent = toggleButton6
-
-local toggleStroke6 = Instance.new("UIStroke")
-toggleStroke6.Color = Color3.fromRGB(255, 50, 50)
-toggleStroke6.Thickness = 1
-toggleStroke6.Parent = toggleButton6
-
+-- Toggle 6: Steal Floor
 local isToggled6 = false
-
 toggleButton6.MouseButton1Click:Connect(function()
     isToggled6 = not isToggled6
-    
-    if isToggled6 then
-        toggleButton6.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
-        print("🔴 Steal Floor: ON")
-        toggleAllFeatures(true)
-    else
-        toggleButton6.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-        print("⚫ Steal Floor: OFF")
-        toggleAllFeatures(false)
-    end
+    if isToggled6 then toggleButton6.BackgroundColor3 = Color3.fromRGB(200, 30, 30) print("🔴 Steal Floor: ON") toggleAllFeatures(true)
+    else toggleButton6.BackgroundColor3 = Color3.fromRGB(80, 0, 0) print("⚫ Steal Floor: OFF") toggleAllFeatures(false) end
 end)
-
--- Content area (placeholder)
-local contentLabel = Instance.new("TextLabel")
-contentLabel.Size = UDim2.new(1, -40, 1, -295) -- Adjusted for increased height
-contentLabel.Position = UDim2.new(0, 20, 0, 290) -- Adjusted position
-contentLabel.BackgroundTransparency = 1
-contentLabel.Text = ""
-contentLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-contentLabel.TextSize = 14
-contentLabel.Font = Enum.Font.Gotham
-contentLabel.TextWrapped = true
-contentLabel.TextYAlignment = Enum.TextYAlignment.Top
-contentLabel.Parent = mainFrame
-
--- ESP update loop
-local respawnDesyncConnection = nil
 
 -- Cleanup on character respawn
 LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(1)
-    updateHumanoidRootPart()
-    
+    task.wait(1) updateHumanoidRootPart()
     if allFeaturesEnabled then
-        -- Restart floor grab after respawn
-        if floorGrabPart then
-            floorGrabPart:Destroy()
-            floorGrabPart = nil
-        end
-        if floorGrabConnection then
-            floorGrabConnection:Disconnect()
-            floorGrabConnection = nil
-        end
-        startFloorGrab()
-        
-        -- Re-equip Laser Cape after respawn
-        task.wait(0.5)
-        autoEquipLaserCape()
+        if floorGrabPart then floorGrabPart:Destroy() floorGrabPart = nil end
+        if floorGrabConnection then floorGrabConnection:Disconnect() floorGrabConnection = nil end
+        startFloorGrab() task.wait(0.5) autoEquipLaserCape()
     end
-    
-    -- Stop travel on respawn
-    if isTraveling then
-        stopAllTravel()
-        resetTravelButton()
-        warn("⚠️ Character respawned - Travel stopped")
-    end
-    
-    -- Stop flying to best on respawn
-    if isFlyingToBest then
-        stopFlyToBest()
-        isToggled5 = false
-        toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-        warn("⚠️ Character respawned - Flight to best stopped")
-    end
-    
-    -- Stop TP processing on respawn
-    if isTpProcessing then
-        isTpProcessing = false
-        isToggled5 = false
-        toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-        warn("⚠️ Character respawned - TP to best stopped")
-    end
-
-    -- Reinitialize ESP if needed
-    if respawnDesyncEnabled then
-        task.wait(1)
-        initializeESP()
-    end
+    if isFlyingToBase or isWalkingToBase then stopAllTravel() isToggled4 = false toggleButton4.BackgroundColor3 = Color3.fromRGB(80, 0, 0) warn("⚠️ Character respawned - Travel to base stopped") end
+    if isFlyingToBest or isTpToBest then stopAllTravelToBest() isToggled5 = false toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0) warn("⚠️ Character respawned - Travel to best stopped") end
+    if respawnDesyncEnabled then task.wait(1) initializeESP() end
 end)
-
 player.CharacterRemoving:Connect(function()
-    stopAllTravel()
-    stopFlyToBest()
-    if respawnDesyncEnabled then
-        deactivateESP()
-    end
+    stopAllTravel() stopAllTravelToBest()
+    if respawnDesyncEnabled then deactivateESP() end
 end)
 
 -- ==================== INITIALIZATION ====================
--- Auto-enable No Walk Animation for current character
-if LocalPlayer.Character then
-    setupNoWalkAnimation(LocalPlayer.Character)
-end
-
+if LocalPlayer.Character then setupNoWalkAnimation(LocalPlayer.Character) end
 print("==========================================")
-print("🎮 NIGHTMARE HUB LOADED!")
+print("🎮 NIGHTMARE HUB LOADED! (CRITICAL FIXES)")
 print("==========================================")
-print("📐 Size: 200x320 (Vertical block)")
-print("🎨 Style: Rounded rectangle")
-print("🖱️ Draggable: YES")
-print("🎮 Font: Arcade")
-print("🔴 Title: NIGHTMARE HUB")
-print("🔆 Transparency: 0.1 (More visible)")
 print("🔘 Toggles: Perm Desync, Speed Booster, Inf Jump, Fly/TP to Best, Steal Floor")
 print("✈️ Special: Fly/Walk to Base with Switch (FIXED)")
 print("📍 New: Server Position ESP with Perm Desync")
