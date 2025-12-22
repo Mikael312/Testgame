@@ -2,9 +2,9 @@
     SIMPLE ARCADE UI 🎮 (UPDATED)
     Rounded rectangle, draggable, arcade style
     WITH SWITCH BUTTON FOR FLY/WALK TO BASE (FIXED)
-    WITH NEW SWITCH TOGGLE FOR FLY/TP TO BEST (NEW)
     WITH NEW RESPAWN DESYNC + SERVER POSITION ESP
     WITH AUTO-ENABLED NO WALK ANIMATION
+    WITH NEW FLY/TP TO BEST FEATURE (FIXED MODULES)
 ]]
 
 -- ==================== SERVICES ====================
@@ -18,17 +18,6 @@ local Workspace = game:GetService("Workspace")
 local StarterGui = game:GetService("StarterGui") -- Service for notifications
 local SoundService = game:GetService("SoundService") -- Service for sounds
 local HttpService = game:GetService("HttpService")
-
--- ==================== MODULES FOR FLY/TP TO BEST ====================
-local Packages = ReplicatedStorage:WaitForChild("Packages")
-local Knit = Packages:WaitForChild("Knit")
-
-local AnimalsModule = require(Knit:WaitForChild("Animals"))
-local TraitsModule = require(Knit:WaitForChild("Traits"))
-local MutationsModule = require(Knit:WaitForChild("Mutations"))
-
-local Net = ReplicatedStorage:WaitForChild("Net")
-local UseItemRemote = Net:WaitForChild("RE"):WaitForChild("UseItem")
 
 -- ==================== VARIABLES ====================
 local player = Players.LocalPlayer
@@ -57,6 +46,23 @@ local respawnDesyncEnabled = false
 
 -- ==================== NO WALK ANIMATION VARIABLES ====================
 local noWalkAnimationEnabled = true
+
+-- ==================== FLY/TP TO BEST VARIABLES ====================
+local isFlyingToBest = false
+local velocityConnection = nil
+
+-- ==================== MODULE DATA FOR BEST PET DETECTION (CORRECTED) ====================
+local AnimalsModule, TraitsModule, MutationsModule
+
+pcall(function()
+    AnimalsModule = require(ReplicatedStorage.Datas.Animals)
+    TraitsModule = require(ReplicatedStorage.Datas.Traits)
+    MutationsModule = require(ReplicatedStorage.Datas.Mutations)
+end)
+
+-- Find the UseItem remote
+local Net = ReplicatedStorage:WaitForChild("Net")
+local UseItemRemote = Net:WaitForChild("RE"):WaitForChild("UseItem")
 
 -- ==================== NO WALK ANIMATION FUNCTIONS ====================
 local function setupNoWalkAnimation(character)
@@ -797,11 +803,7 @@ local function doFlyToBase()
     return true
 end
 
--- ==================== COMMON HELPER FUNCTIONS FOR FLY/TP TO BEST ====================
--- Global variable for flight control
-local velocityConnection = nil
-local isFlying = false
-
+-- ==================== FLY/TP TO BEST FUNCTIONS (FROM YOUR ORIGINAL CODE) ====================
 -- Helper function to get trait multiplier
 local function getTraitMultiplier(model)
     if not TraitsModule then return 0 end
@@ -932,7 +934,7 @@ local function findBestPet()
         end
     end
     
-    -- Fallback to old text-based system
+    -- Fallback to the old text-based system
     for _, plot in pairs(plots:GetChildren()) do
         if not isPlayerPlot(plot) then
             for _, obj in pairs(plot:GetDescendants()) do
@@ -1146,16 +1148,17 @@ local function getSafeOutsideDecorPos(plot, targetPos, fromPos)
     return Vector3.new(worldPos.X, targetPos.Y, worldPos.Z)
 end
 
--- ==================== FLY TO BEST SPECIFIC FUNCTIONS ====================
+-- Stop velocity flight
 local function stopVelocityFlight()
     if velocityConnection then
         velocityConnection:Disconnect()
         velocityConnection = nil
     end
-    isFlying = false
+    isFlyingToBest = false
 end
 
-local function velocityFlightToPet(statusLabel, toggleButton)
+-- Velocity flight to pet (YOUR ORIGINAL flyToBest function)
+local function velocityFlightToPet()
     local character = LocalPlayer.Character
     if not character then 
         return false
@@ -1201,7 +1204,7 @@ local function velocityFlightToPet(statusLabel, toggleButton)
     
     task.wait(0.05)
     
-    isFlying = true
+    isFlyingToBest = true
     
     local direction = (finalPos - hrp.Position).Unit
     local distance = (finalPos - hrp.Position).Magnitude
@@ -1209,8 +1212,8 @@ local function velocityFlightToPet(statusLabel, toggleButton)
     local baseSpeed = 180
     
     velocityConnection = RunService.Heartbeat:Connect(function()
-        if not isFlying then
-            velocityConnection:Disconnect()
+        if not isFlyingToBest then
+            if velocityConnection then velocityConnection:Disconnect() end
             return
         end
         
@@ -1249,7 +1252,6 @@ local function velocityFlightToPet(statusLabel, toggleButton)
     return true
 end
 
--- ==================== TP TO BEST SPECIFIC FUNCTIONS ====================
 -- Format number for display (TP version uses $)
 local function formatNumberTP(num)
     if num >= 1e12 then
@@ -1353,8 +1355,8 @@ local function stopVelocity()
     end
 end
 
--- Safe teleport to pet
-local function safeTeleportToPet(statusLabel)
+-- Safe teleport to pet (YOUR ORIGINAL tpToBest function)
+local function safeTeleportToPet()
     local character = LocalPlayer.Character
     if not character then 
         return false
@@ -1928,7 +1930,7 @@ toggleButton4.MouseButton1Click:Connect(function()
     else
         print("🔴 Walk to Base: ON")
         walkThread = task.spawn(doWalkToBase) -- Run walk function in a new thread
-        success = true -- Assume success for now, the function itself handles failure
+        success = true -- Assume success for now, function itself handles failure
     end
 
     -- If the start function failed, reset everything.
@@ -1970,20 +1972,6 @@ doWalkToBase = function(...)
     -- This function runs in a thread, so we can reset the UI directly after it finishes
     resetTravelButton()
     return success
-end
-
--- ==================== PLACEHOLDER FUNCTIONS UNTUK FLY/TP TO BEST ====================
-local function flyToBest()
-    velocityFlightToPet()
-end
-
-local function tpToBest()
-    safeTeleportToPet()
-end
-
-local function stopFlyOrTpBest()
-    stopVelocityFlight()
-    stopVelocity()
 end
 
 -- ==================== TOGGLE BUTTON 6 WITH SWITCH - Fly/Tp to Best (NEW) ====================
@@ -2038,7 +2026,8 @@ switchButton6.MouseButton1Click:Connect(function()
     if isToggled6 then
         isToggled6 = false
         toggleButton6.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-        stopFlyOrTpBest() -- Hentikan fungsi yang sedang berjalan
+        stopVelocityFlight() -- Hentikan fungsi yang sedang berjalan
+        stopVelocity()
         print("⚫ Feature stopped due to mode switch.")
     end
 
@@ -2062,15 +2051,16 @@ toggleButton6.MouseButton1Click:Connect(function()
         toggleButton6.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
         if isFlyBestMode then
             print("🔴 Fly to Best: ON")
-            flyToBest() -- Panggil function anda
+            velocityFlightToPet() -- Panggil function anda
         else
             print("🔴 Tp to Best: ON")
-            tpToBest() -- Panggil function anda
+            safeTeleportToPet() -- Panggil function anda
         end
     else
         toggleButton6.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
         print("⚫ Fly/Tp to Best: OFF")
-        stopFlyOrTpBest() -- Panggil function berhenti
+        stopVelocityFlight() -- Panggil function berhenti
+        stopVelocity()
     end
 end)
 
@@ -2161,7 +2151,8 @@ LocalPlayer.CharacterAdded:Connect(function()
     if isToggled6 then
         isToggled6 = false
         toggleButton6.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
-        stopFlyOrTpBest()
+        stopVelocityFlight()
+        stopVelocity()
         warn("⚠️ Character respawned - Fly/Tp to Best stopped")
     end
     
