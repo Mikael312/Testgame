@@ -1079,7 +1079,7 @@ local function getSafeOutsideDecorPos(plot, targetPos, fromPos)
     
     local center = info.center
     local halfSize = info.halfSize
-    local MARGIN = 6
+    local MARGIN = 3.1
     
     local localTarget = targetPos - center
     local insideX = math.abs(localTarget.X) <= halfSize.X + MARGIN
