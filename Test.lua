@@ -390,29 +390,29 @@ local function toggleAllFeatures(enabled)
     allFeaturesEnabled = enabled
     
     if allFeaturesEnabled then
-        print("═══════════════════════════════")
+        print("═════════════════════════════════")
         print("🚀 ACTIVATING ALL FEATURES...")
-        print("═══════════════════════════════")
+        print("═════════════════════════════════")
         
         -- Start all features
         startFloorGrab()
         startXrayBase()
         startAutoLaser()
         
-        print("═══════════════════════════════")
+        print("═════════════════════════════════")
         print("✅ ALL FEATURES ACTIVATED!")
-        print("═══════════════════════════════")
+        print("═════════════════════════════════")
     else
         print("═══════════════════════════════")
         print("🛑 DEACTIVATING ALL FEATURES...")
-        print("═══════════════════════════════")
+        print("═════════════════════════════════")
         
         -- Stop all features
         stopFloorGrab()
         stopXrayBase()
         stopAutoLaser()
         
-        print("═══════════════════════════════")
+        print("═════════════════════════════════")
         print("❌ ALL FEATURES DEACTIVATED!")
         print("═══════════════════════════════")
     end
@@ -1262,9 +1262,11 @@ local function completeFlyToBest()
     -- Stop the flight mechanics
     stopVelocityFlight()
     
-    -- Reset the UI state
+    -- Reset the UI state (with safety checks)
     isToggled5 = false
-    toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
+    if toggleButton5 and toggleButton5.BackgroundColor3 then
+        toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
+    end
     
     print("🛑 Fly to Best complete. Toggle auto-off.")
 end
@@ -1780,6 +1782,12 @@ local function respawnDesync()
 end
 
 -- ==================== UI CREATION ====================
+-- Check if script is already running
+if game.CoreGui:FindFirstChild("SimpleArcadeUI") then
+    warn("Script is already running! Please remove the old script before running a new one.")
+    return
+end
+
 for _, gui in pairs(game.CoreGui:GetChildren()) do
     if gui.Name == "SimpleArcadeUI" then
         gui:Destroy()
@@ -2153,7 +2161,7 @@ switchButton5.TextSize = 18
 switchButton5.Font = Enum.Font.GothamBold
 switchButton5.Parent = mainFrame
 
-local switchCorner5 = Instance.new("UICorner")
+local switchCorner5 = Instance.new("UIModule.new("UICorner")
 switchCorner5.CornerRadius = UDim.new(0, 10)
 switchCorner5.Parent = switchButton5
 
@@ -2188,14 +2196,18 @@ toggleButton5.MouseButton1Click:Connect(function()
     -- If the toggle is ON, turn it OFF.
     if isToggled5 then
         isToggled5 = false
-        toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
+        if toggleButton5 and toggleButton5.BackgroundColor3 then
+            toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
+        end
         print("⚫ Toggle manually turned off.")
         return -- Exit the function.
     end
 
     -- If we are here, the toggle is OFF and nothing is running. Let's start an action.
     isToggled5 = true
-    toggleButton5.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
+    if toggleButton5 and toggleButton5.BackgroundColor3 then
+        toggleButton5.BackgroundColor3 = Color3.fromRGB(200, 30, 30)
+    end
     
     if isFlyToBestMode then
         print("🔴 Fly to Best: ON")
@@ -2206,7 +2218,9 @@ toggleButton5.MouseButton1Click:Connect(function()
         -- The TP function is instant, so we turn off the toggle immediately after.
         tpToBest()
         isToggled5 = false
-        toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
+        if toggleButton5 and toggleButton5.BackgroundColor3 then
+            toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
+        end
     end
 end)
 
@@ -2296,7 +2310,9 @@ LocalPlayer.CharacterAdded:Connect(function()
     if isFlyingToBest then
         completeFlyToBest() -- *** FIX: Use the new function here as well ***
         isToggled5 = false
-        toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
+        if toggleButton5 and toggleButton5.BackgroundColor3 then
+            toggleButton5.BackgroundColor3 = Color3.fromRGB(80, 0, 0)
+        end
         warn("⚠️ Character respawned - Flight to best stopped")
     end
     
