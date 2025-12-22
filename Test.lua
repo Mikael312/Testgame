@@ -1315,7 +1315,7 @@ local function velocityFlightToPet()
     local distance = (finalPos - hrp.Position).Magnitude
     
     -- Base speed
-    local baseSpeed = 200
+    local baseSpeed = 180
     
     -- Apply velocity in Heartbeat loop (smooth flight with slowdown)
     velocityConnection = RunService.Heartbeat:Connect(function()
