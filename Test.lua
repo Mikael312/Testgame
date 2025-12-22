@@ -1316,7 +1316,7 @@ local function stopVelocity()
     end
 end
 
--- Safe teleport to pet (now uses the unified finder)
+ -- Safe teleport to pet (now uses unified finder and side bounce logic)
 local function safeTeleportToPet()
     local character = LocalPlayer.Character
     if not character then 
@@ -1340,6 +1340,17 @@ local function safeTeleportToPet()
     local currentPos = hrp.Position
     local targetPos = bestPet.position
     local plot = bestPet.plot
+    
+    -- FIX: Calculate approachPos first, just like in flyToBest
+    local directionToPet = (targetPos - currentPos).Unit
+    local approachPos = targetPos - (directionToPet * 7)
+    
+    local animalY = targetPos.Y
+    if animalY > 10 then
+        approachPos = Vector3.new(approachPos.X, 20, approachPos.Z)
+    else
+        approachPos = Vector3.new(approachPos.X, animalY + 2, approachPos.Z)
+    end
     
     local state = humanoid:GetState()
     if state ~= Enum.HumanoidStateType.Jumping and state ~= Enum.HumanoidStateType.Freefall then
@@ -1383,7 +1394,6 @@ local function safeTeleportToPet()
     local grappleEquipped = autoEquipGrapple()
     
     if grappleEquipped then
-        -- TAMBAH SEMULA: Panggilan fireGrapple() yang hilang
         fireGrapple()
     end
     
@@ -1393,9 +1403,11 @@ local function safeTeleportToPet()
     
     task.wait(0.1)
     
-    local finalPos = getSafeOutsideDecorPos(plot, targetPos, currentPos)
+    -- FIX: Use the calculated approachPos for the side bounce logic
+    local finalPos = getSafeOutsideDecorPos(plot, approachPos, currentPos)
     
-    local animalY = targetPos.Y
+    -- The rest of the logic for adjusting Y position seems fine, but the initial position is now correct.
+    local animalY = finalPos.Y -- Use Y from the potentially adjusted finalPos
     if animalY > 10 then
         finalPos = Vector3.new(finalPos.X, 20, finalPos.Z)
     else
