@@ -17,6 +17,18 @@ local PathfindingService = game:GetService("PathfindingService")
 local Workspace = game:GetService("Workspace")
 local StarterGui = game:GetService("StarterGui") -- Service for notifications
 local SoundService = game:GetService("SoundService") -- Service for sounds
+local HttpService = game:GetService("HttpService")
+
+-- ==================== MODULES FOR FLY/TP TO BEST ====================
+local Packages = ReplicatedStorage:WaitForChild("Packages")
+local Knit = Packages:WaitForChild("Knit")
+
+local AnimalsModule = require(Knit:WaitForChild("Animals"))
+local TraitsModule = require(Knit:WaitForChild("Traits"))
+local MutationsModule = require(Knit:WaitForChild("Mutations"))
+
+local Net = ReplicatedStorage:WaitForChild("Net")
+local UseItemRemote = Net:WaitForChild("RE"):WaitForChild("UseItem")
 
 -- ==================== VARIABLES ====================
 local player = Players.LocalPlayer
@@ -785,6 +797,653 @@ local function doFlyToBase()
     return true
 end
 
+-- ==================== COMMON HELPER FUNCTIONS FOR FLY/TP TO BEST ====================
+-- Global variable for flight control
+local velocityConnection = nil
+local isFlying = false
+
+-- Helper function to get trait multiplier
+local function getTraitMultiplier(model)
+    if not TraitsModule then return 0 end
+    
+    local traitJson = model:GetAttribute("Traits")
+    if not traitJson or traitJson == "" then
+        return 0
+    end
+
+    local traits = {}
+    local ok, decoded = pcall(function()
+        return HttpService:JSONDecode(traitJson)
+    end)
+
+    if ok and typeof(decoded) == "table" then
+        traits = decoded
+    else
+        for t in string.gmatch(traitJson, "[^,]+") do
+            table.insert(traits, t)
+        end
+    end
+
+    local mult = 0
+    for _, entry in pairs(traits) do
+        local name = typeof(entry) == "table" and entry.Name or tostring(entry)
+        name = name:gsub("^_Trait%.", "")
+
+        local trait = TraitsModule[name]
+        if trait and trait.MultiplierModifier then
+            mult += tonumber(trait.MultiplierModifier) or 0
+        end
+    end
+
+    return mult
+end
+
+-- Helper function to get final generation
+local function getFinalGeneration(model)
+    if not AnimalsModule then return 0 end
+    
+    local animalData = AnimalsModule[model.Name]
+    if not animalData then return 0 end
+
+    local baseGen = tonumber(animalData.Generation) or tonumber(animalData.Price or 0)
+
+    local traitMult = getTraitMultiplier(model)
+
+    local mutationMult = 0
+    if MutationsModule then
+        local mutation = model:GetAttribute("Mutation")
+        if mutation and MutationsModule[mutation] then
+            mutationMult = tonumber(MutationsModule[mutation].Modifier or 0)
+        end
+    end
+
+    local final = baseGen * (1 + traitMult + mutationMult)
+    return math.max(1, math.round(final))
+end
+
+-- Format number for display
+local function formatNumber(num)
+    if num >= 1e12 then
+        return string.format("%.1fT/s", num / 1e12)
+    elseif num >= 1e9 then
+        return string.format("%.1fB/s", num / 1e9)
+    elseif num >= 1e6 then
+        return string.format("%.1fM/s", num / 1e6)
+    elseif num >= 1e3 then
+        return string.format("%.1fK/s", num / 1e3)
+    else
+        return string.format("%.0f/s", num)
+    end
+end
+
+-- Check if plot is player's plot
+local function isPlayerPlot(plot)
+    local plotSign = plot:FindFirstChild("PlotSign")
+    if plotSign then
+        local yourBase = plotSign:FindFirstChild("YourBase")
+        if yourBase and yourBase.Enabled then
+            return true
+        end
+    end
+    return false
+end
+
+-- Find best pet
+local function findBestPet()
+    local plots = Workspace:FindFirstChild("Plots")
+    if not plots then return nil end
+    
+    local highest = {value = 0}
+    
+    -- First try using the new module-based system
+    if AnimalsModule then
+        for _, plot in pairs(plots:GetChildren()) do
+            if not isPlayerPlot(plot) then
+                for _, obj in pairs(plot:GetDescendants()) do
+                    if obj:IsA("Model") and AnimalsModule[obj.Name] then
+                        pcall(function()
+                            local gen = getFinalGeneration(obj)
+                            
+                            if gen > 0 and gen > highest.value then
+                                local root = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart
+                                
+                                if root then
+                                    highest = {
+                                        plot = plot,
+                                        plotName = plot.Name,
+                                        petName = obj.Name,
+                                        generation = gen,
+                                        formattedValue = formatNumber(gen),
+                                        model = obj,
+                                        value = gen,
+                                        position = root.Position,
+                                        cframe = root.CFrame
+                                    }
+                                end
+                            end
+                        end)
+                    end
+                end
+            end
+        end
+        
+        if highest.value > 0 then
+            return highest
+        end
+    end
+    
+    -- Fallback to old text-based system
+    for _, plot in pairs(plots:GetChildren()) do
+        if not isPlayerPlot(plot) then
+            for _, obj in pairs(plot:GetDescendants()) do
+                if obj:IsA("TextLabel") then
+                    local txt = obj.Text or ""
+                    
+                    if txt:find("/") and txt:lower():find("s") then
+                        pcall(function()
+                            local nameLabel = nil
+                            local parent = obj.Parent
+                            
+                            if parent then
+                                nameLabel = parent:FindFirstChild("DisplayName")
+                                
+                                if not nameLabel and parent.Parent then
+                                    nameLabel = parent.Parent:FindFirstChild("DisplayName")
+                                end
+                            end
+                            
+                            if not nameLabel or nameLabel.Text == "" or txt == "" or txt == "N/A" then
+                                return
+                            end
+                            
+                            local petName = nameLabel.Text
+                            local genText = txt
+                            
+                            -- Try to parse the value
+                            local value = nil
+                            if genText:find("T/s") then
+                                value = tonumber(genText:match("(%d+%.?%d*)T/s")) * 1e12
+                            elseif genText:find("B/s") then
+                                value = tonumber(genText:match("(%d+%.?%d*)B/s")) * 1e9
+                            elseif genText:find("M/s") then
+                                value = tonumber(genText:match("(%d+%.?%d*)M/s")) * 1e6
+                            elseif genText:find("K/s") then
+                                value = tonumber(genText:match("(%d+%.?%d*)K/s")) * 1e3
+                            else
+                                value = tonumber(genText:match("(%d+%.?%d*)/s")) or 0
+                            end
+                            
+                            if value and value > 0 and value > highest.value then
+                                local model = obj:FindFirstAncestorOfClass('Model')
+                                
+                                if model then
+                                    local part = model.PrimaryPart or model:FindFirstChildWhichIsA('BasePart')
+                                    
+                                    if part then
+                                        highest = {
+                                            plot = plot,
+                                            plotName = plot.Name,
+                                            petName = petName,
+                                            generation = value,
+                                            formattedValue = genText,
+                                            model = model,
+                                            value = value,
+                                            position = part.Position,
+                                            cframe = part.CFrame
+                                        }
+                                    end
+                                end
+                            end
+                        end)
+                    end
+                end
+            end
+        end
+    end
+    
+    return highest.value > 0 and highest or nil
+end
+
+-- Auto-equip Grapple Hook
+local function autoEquipGrapple()
+    local success, result = pcall(function()
+        local character = LocalPlayer.Character
+        if not character then return false end
+        
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if not (humanoid and humanoid.Health > 0) then return false end
+        
+        humanoid:UnequipTools()
+        
+        local backpack = LocalPlayer:WaitForChild("Backpack")
+        local grapple = backpack:FindFirstChild("Grapple Hook")
+        
+        if grapple then
+            grapple.Parent = character
+            humanoid:EquipTool(grapple)
+            return true
+        end
+        
+        return false
+    end)
+    
+    return success and result
+end
+
+-- Fire Grapple Hook
+local function fireGrapple()
+    pcall(function()
+        local args = {1.9832406361897787}
+        UseItemRemote:FireServer(unpack(args))
+    end)
+end
+
+-- Get side bounds
+local function getSideBounds(sideFolder)
+    if not sideFolder then return nil end
+    
+    local minX, minY, minZ = math.huge, math.huge, math.huge
+    local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+    local found = false
+    
+    local function scan(obj)
+        for _, child in ipairs(obj:GetChildren()) do
+            if child:IsA("BasePart") then
+                found = true
+                local p = child.Position
+                minX = math.min(minX, p.X)
+                minY = math.min(minY, p.Y)
+                minZ = math.min(minZ, p.Z)
+                maxX = math.max(maxX, p.X)
+                maxY = math.max(maxY, p.Y)
+                maxZ = math.max(maxZ, p.Z)
+            else
+                scan(child)
+            end
+        end
+    end
+    
+    scan(sideFolder)
+    if not found then return nil end
+    
+    local center = Vector3.new((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5)
+    local halfSize = Vector3.new((maxX - minX) * 0.5, (maxY - minY) * 0.5, (maxZ - minZ) * 0.5)
+    
+    return {
+        center = center,
+        halfSize = halfSize,
+        minX = minX,
+        maxX = maxX,
+        minZ = minZ,
+        maxZ = maxZ,
+    }
+end
+
+-- Get safe outside decoration position
+local function getSafeOutsideDecorPos(plot, targetPos, fromPos)
+    local decorations = plot:FindFirstChild("Decorations")
+    if not decorations then return targetPos end
+    
+    local side3Folder = decorations:FindFirstChild("Side 3")
+    if not side3Folder then return targetPos end
+    
+    local info = getSideBounds(side3Folder)
+    if not info then return targetPos end
+    
+    local center = info.center
+    local halfSize = info.halfSize
+    local MARGIN = 6
+    
+    local localTarget = targetPos - center
+    local insideX = math.abs(localTarget.X) <= halfSize.X + MARGIN
+    local insideZ = math.abs(localTarget.Z) <= halfSize.Z + MARGIN
+    
+    if not (insideX and insideZ) then
+        return targetPos
+    end
+    
+    local src = fromPos and (fromPos - center) or localTarget
+    local dir = Vector3.new(src.X, 0, src.Z)
+    
+    if dir.Magnitude < halfSize.X * 0.5 then
+        local distToEdges = {
+            {axis = "X", sign = 1, dist = halfSize.X - localTarget.X},
+            {axis = "X", sign = -1, dist = halfSize.X + localTarget.X},
+            {axis = "Z", sign = 1, dist = halfSize.Z - localTarget.Z},
+            {axis = "Z", sign = -1, dist = halfSize.Z + localTarget.Z}
+        }
+        
+        table.sort(distToEdges, function(a, b) return a.dist < b.dist end)
+        
+        local nearest = distToEdges[1]
+        if nearest.axis == "X" then
+            dir = Vector3.new(nearest.sign, 0, 0)
+        else
+            dir = Vector3.new(0, 0, nearest.sign)
+        end
+    end
+    
+    local dirUnit = dir.Unit
+    
+    local tx, tz = math.huge, math.huge
+    
+    if dirUnit.X ~= 0 then
+        local boundX = (dirUnit.X > 0) and halfSize.X or -halfSize.X
+        tx = boundX / dirUnit.X
+    end
+    
+    if dirUnit.Z ~= 0 then
+        local boundZ = (dirUnit.Z > 0) and halfSize.Z or -halfSize.Z
+        tz = boundZ / dirUnit.Z
+    end
+    
+    local tHit = math.min(tx, tz)
+    if tHit == math.huge then return targetPos end
+    
+    local boundaryLocal = dirUnit * (tHit + MARGIN)
+    local worldPos = center + boundaryLocal
+    
+    return Vector3.new(worldPos.X, targetPos.Y, worldPos.Z)
+end
+
+-- ==================== FLY TO BEST SPECIFIC FUNCTIONS ====================
+local function stopVelocityFlight()
+    if velocityConnection then
+        velocityConnection:Disconnect()
+        velocityConnection = nil
+    end
+    isFlying = false
+end
+
+local function velocityFlightToPet(statusLabel, toggleButton)
+    local character = LocalPlayer.Character
+    if not character then 
+        return false
+    end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChild("Humanoid")
+    
+    if not hrp or not humanoid then 
+        return false
+    end
+    
+    local bestPet = findBestPet()
+    
+    if not bestPet then
+        return false
+    end
+    
+    local currentPos = hrp.Position
+    local targetPos = bestPet.position
+    local plot = bestPet.plot
+    
+    local directionToPet = (targetPos - currentPos).Unit
+    local approachPos = targetPos - (directionToPet * 7)
+    
+    local animalY = targetPos.Y
+    if animalY > 10 then
+        approachPos = Vector3.new(approachPos.X, 20, approachPos.Z)
+    else
+        approachPos = Vector3.new(approachPos.X, animalY + 2, approachPos.Z)
+    end
+    
+    local finalPos = getSafeOutsideDecorPos(plot, approachPos, currentPos)
+    
+    local grappleEquipped = autoEquipGrapple()
+    if not grappleEquipped then
+        return false
+    end
+    
+    task.wait(0.1)
+    
+    fireGrapple()
+    
+    task.wait(0.05)
+    
+    isFlying = true
+    
+    local direction = (finalPos - hrp.Position).Unit
+    local distance = (finalPos - hrp.Position).Magnitude
+    
+    local baseSpeed = 180
+    
+    velocityConnection = RunService.Heartbeat:Connect(function()
+        if not isFlying then
+            velocityConnection:Disconnect()
+            return
+        end
+        
+        local character = LocalPlayer.Character
+        if not character then
+            stopVelocityFlight()
+            return
+        end
+        
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            stopVelocityFlight()
+            return
+        end
+        
+        local distanceToTarget = (finalPos - hrp.Position).Magnitude
+        
+        if distanceToTarget <= 3 then
+            stopVelocityFlight()
+            hrp.CFrame = CFrame.new(finalPos)
+            return
+        end
+        
+        local currentSpeed = baseSpeed
+        if distanceToTarget <= 20 then
+            local slowdownFactor = distanceToTarget / 20
+            currentSpeed = math.max(50, baseSpeed * slowdownFactor)
+        end
+        
+        local currentDirection = (finalPos - hrp.Position).Unit
+        local velocityVector = currentDirection * currentSpeed
+        
+        hrp.Velocity = velocityVector
+    end)
+    
+    return true
+end
+
+-- ==================== TP TO BEST SPECIFIC FUNCTIONS ====================
+-- Format number for display (TP version uses $)
+local function formatNumberTP(num)
+    if num >= 1e12 then
+        return string.format("$%.1fT", num / 1e12)
+    elseif num >= 1e9 then
+        return string.format("$%.1fB", num / 1e9)
+    elseif num >= 1e6 then
+        return string.format("$%.1fM", num / 1e6)
+    elseif num >= 1e3 then
+        return string.format("$%.1fK", num / 1e3)
+    else
+        return string.format("$%.0f", num)
+    end
+end
+
+-- Find best pet (TP version)
+local function findBestPetTP()
+    local plots = Workspace:FindFirstChild("Plots")
+    if not plots then return nil end
+    
+    local highest = {value = 0}
+    
+    for _, plot in pairs(plots:GetChildren()) do
+        if not isPlayerPlot(plot) then
+            for _, obj in pairs(plot:GetDescendants()) do
+                if obj:IsA("Model") and AnimalsModule and AnimalsModule[obj.Name] then
+                    pcall(function()
+                        local gen = getFinalGeneration(obj)
+                        
+                        if gen > 0 and gen > highest.value then
+                            local root = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart or obj:FindFirstChildWhichIsA('BasePart')
+                                
+                            if root then
+                                highest = {
+                                    plot = plot,
+                                    plotName = plot.Name,
+                                    petName = obj.Name,
+                                    price = formatNumberTP(gen),
+                                    priceValue = gen,
+                                    model = obj,
+                                    part = root,
+                                    position = root.Position,
+                                    cframe = root.CFrame,
+                                    value = gen
+                                }
+                            end
+                        end
+                    end)
+                end
+            end
+        end
+    end
+    
+    return highest.value > 0 and highest or nil
+end
+
+-- Equip Flying Carpet
+local function equipFlyingCarpet()
+    local success, result = pcall(function()
+        local character = LocalPlayer.Character
+        if not character then return false end
+        
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if not (humanoid and humanoid.Health > 0) then return false end
+        
+        humanoid:UnequipTools()
+        
+        local backpack = LocalPlayer:WaitForChild("Backpack")
+        local carpet = backpack:FindFirstChild("Flying Carpet") or 
+                      backpack:FindFirstChild("FlyingCarpet") or
+                      backpack:FindFirstChild("flying carpet") or
+                      backpack:FindFirstChild("flyingcarpet")
+        
+        if carpet then
+            carpet.Parent = character
+            humanoid:EquipTool(carpet)
+            return true
+        end
+        
+        local equippedCarpet = character:FindFirstChild("Flying Carpet") or 
+                               character:FindFirstChild("FlyingCarpet") or
+                               character:FindFirstChild("flying carpet") or
+                               character:FindFirstChild("flyingcarpet")
+        
+        if equippedCarpet and equippedCarpet:IsA("Tool") then
+            humanoid:EquipTool(equippedCarpet)
+            return true
+        end
+        
+        return false
+    end)
+    
+    return success and result
+end
+
+-- Stop velocity
+local function stopVelocity()
+    if velocityConnection then
+        velocityConnection:Disconnect()
+        velocityConnection = nil
+    end
+end
+
+-- Safe teleport to pet
+local function safeTeleportToPet(statusLabel)
+    local character = LocalPlayer.Character
+    if not character then 
+        return false
+    end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChild("Humanoid")
+    
+    if not hrp or not humanoid then 
+        return false
+    end
+    
+    local bestPet = findBestPetTP()
+    
+    if not bestPet then
+        return false
+    end
+    
+    local currentPos = hrp.Position
+    local targetPos = bestPet.position
+    local plot = bestPet.plot
+    
+    local state = humanoid:GetState()
+    if state ~= Enum.HumanoidStateType.Jumping and state ~= Enum.HumanoidStateType.Freefall then
+        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        task.wait(0.05)
+    end
+    
+    local targetUpwardSpeed = 120
+    local currentUpwardSpeed = 0
+    local smoothness = 0.25
+    local elapsed = 0
+    local maxDuration = 0.3
+    
+    velocityConnection = RunService.Heartbeat:Connect(function(dt)
+        elapsed = elapsed + dt
+        
+        if elapsed >= maxDuration then
+            stopVelocity()
+            return
+        end
+        
+        local character = LocalPlayer.Character
+        if not character then
+            stopVelocity()
+            return
+        end
+        
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            stopVelocity()
+            return
+        end
+        
+        currentUpwardSpeed = currentUpwardSpeed + (targetUpwardSpeed - currentUpwardSpeed) * smoothness
+        hrp.Velocity = Vector3.new(hrp.Velocity.X, currentUpwardSpeed, hrp.Velocity.Z)
+    end)
+    
+    task.wait(0.3)
+    stopVelocity()
+    
+    local grappleEquipped = autoEquipGrapple()
+    
+    if grappleEquipped then
+        fireGrapple()
+    end
+    
+    task.wait(0.05)
+    
+    local carpetEquipped = equipFlyingCarpet()
+    
+    task.wait(0.1)
+    
+    local finalPos = getSafeOutsideDecorPos(plot, targetPos, currentPos)
+    
+    local animalY = targetPos.Y
+    if animalY > 10 then
+        finalPos = Vector3.new(finalPos.X, 20, finalPos.Z)
+    else
+        finalPos = Vector3.new(finalPos.X, animalY, finalPos.Z)
+    end
+    
+    hrp.CFrame = CFrame.new(finalPos)
+    
+    task.wait(0.5)
+    
+    return true
+end
+
 -- ==================== DESYNC ESP FUNCTIONS ====================
 -- Initialize ESP Folder
 local function initializeESPFolder()
@@ -1314,20 +1973,17 @@ doWalkToBase = function(...)
 end
 
 -- ==================== PLACEHOLDER FUNCTIONS UNTUK FLY/TP TO BEST ====================
--- GANTIKAN PRINT INI DENGAN FUNCTION ANDA
 local function flyToBest()
-    print("🚀 Function 'flyToBest' is running...")
-    -- GUNAKAN FUNCTION AWAK SINI
+    velocityFlightToPet()
 end
 
 local function tpToBest()
-    print("✨ Function 'tpToBest' is running...")
-    -- GUNAKAN FUNCTION AWAK SINI
+    safeTeleportToPet()
 end
 
 local function stopFlyOrTpBest()
-    print("🛑 Stopping Fly/Tp to Best functions.")
-    -- GUNAKAN FUNCTION AWAK SINI UNTUK HENTIKAN PROSES
+    stopVelocityFlight()
+    stopVelocity()
 end
 
 -- ==================== TOGGLE BUTTON 6 WITH SWITCH - Fly/Tp to Best (NEW) ====================
