@@ -4,7 +4,7 @@
     WITH SWITCH BUTTON FOR FLY/WALK TO BASE (FIXED)
     WITH NEW RESPAWN DESYNC + SERVER POSITION ESP
     WITH AUTO-ENABLED NO WALK ANIMATION
-    WITH NEW FLY/TP TO BEST FEATURE (FIXED MODULES)
+    WITH NEW FLY/TP TO BEST FEATURE (FIXED MODULES & LOGIC)
 ]]
 
 -- ==================== SERVICES ====================
@@ -59,6 +59,10 @@ pcall(function()
     TraitsModule = require(ReplicatedStorage.Datas.Traits)
     MutationsModule = require(ReplicatedStorage.Datas.Mutations)
 end)
+
+-- Find UseItem remote
+local Net = ReplicatedStorage:WaitForChild("Net")
+local UseItemRemote = Net:WaitForChild("RE"):WaitForChild("UseItem")
 
 -- ==================== NO WALK ANIMATION FUNCTIONS ====================
 local function setupNoWalkAnimation(character)
@@ -290,7 +294,7 @@ local function isValidTarget(player)
     local hrp = player.Character:FindFirstChild("HumanoidRootPart")
     local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
     if not hrp or not humanoid then return false end
-    if humanoid.Health <= 0 then return false end
+    if humanoid.Health <=0 then return false end
     return true
 end
 
@@ -1152,7 +1156,7 @@ local function velocityFlightToPet()
         return false
     end
     
-    -- BAHARU: Gunakan fungsi pencarian yang disatukan
+    -- Use the unified finder function
     local bestPet = findTheAbsoluteBestPet()
     
     if not bestPet then
@@ -1182,6 +1186,7 @@ local function velocityFlightToPet()
     
     task.wait(0.1)
     
+    -- TAMBAH SEMULA: Panggilan fireGrapple() yang hilang
     fireGrapple()
     
     task.wait(0.05)
@@ -1325,7 +1330,7 @@ local function safeTeleportToPet()
         return false
     end
     
-    -- BAHARU: Gunakan fungsi pencarian yang disatukan
+    -- Use the unified finder function
     local bestPet = findTheAbsoluteBestPet()
     
     if not bestPet then
@@ -1378,6 +1383,7 @@ local function safeTeleportToPet()
     local grappleEquipped = autoEquipGrapple()
     
     if grappleEquipped then
+        -- TAMBAH SEMULA: Panggilan fireGrapple() yang hilang
         fireGrapple()
     end
     
@@ -1401,8 +1407,8 @@ local function safeTeleportToPet()
     task.wait(0.5)
     
     return true
-end                                
-                                                
+end
+
 -- ==================== DESYNC ESP FUNCTIONS ====================
 -- Initialize ESP Folder
 local function initializeESPFolder()
