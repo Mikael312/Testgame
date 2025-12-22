@@ -60,10 +60,6 @@ pcall(function()
     MutationsModule = require(ReplicatedStorage.Datas.Mutations)
 end)
 
--- Find UseItem remote
-local Net = ReplicatedStorage:WaitForChild("Net")
-local UseItemRemote = Net:WaitForChild("RE"):WaitForChild("UseItem")
-
 -- ==================== NO WALK ANIMATION FUNCTIONS ====================
 local function setupNoWalkAnimation(character)
     local humanoid = character:WaitForChild("Humanoid")
@@ -1018,6 +1014,10 @@ local function autoEquipGrapple()
 end
 
 -- Fire Grapple Hook
+local UseItemRemote = ReplicatedStorage:WaitForChild("Packages")
+    :WaitForChild("Net")
+    :WaitForChild("RE/UseItem")
+
 local function fireGrapple()
     pcall(function()
         local args = {1.9832406361897787}
