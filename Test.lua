@@ -60,10 +60,6 @@ pcall(function()
     MutationsModule = require(ReplicatedStorage.Datas.Mutations)
 end)
 
--- Find the UseItem remote
-local Net = ReplicatedStorage:WaitForChild("Net")
-local UseItemRemote = Net:WaitForChild("RE"):WaitForChild("UseItem")
-
 -- ==================== NO WALK ANIMATION FUNCTIONS ====================
 local function setupNoWalkAnimation(character)
     local humanoid = character:WaitForChild("Humanoid")
