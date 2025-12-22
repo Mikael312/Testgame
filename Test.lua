@@ -1272,6 +1272,15 @@ local function velocityFlightToPet()
         return false
     end
     
+    -- Ensure any existing velocity connection is properly disconnected
+    if velocityConnection then
+        velocityConnection:Disconnect()
+        velocityConnection = nil
+    end
+    
+    -- Reset isFlyingToBest flag
+    isFlyingToBest = false
+    
     -- Step 1: Find highest pet
     print("🔍 Scanning for best pet...")
     
@@ -1337,7 +1346,10 @@ local function velocityFlightToPet()
     -- Apply velocity in Heartbeat loop (smooth flight with slowdown)
     velocityConnection = RunService.Heartbeat:Connect(function()
         if not isFlyingToBest then
-            velocityConnection:Disconnect()
+            if velocityConnection then
+                velocityConnection:Disconnect()
+                velocityConnection = nil
+            end
             return
         end
         
@@ -1558,6 +1570,9 @@ local function tpToBest()
     hrp.CFrame = CFrame.new(finalPos)
     
     print("✅ TP + Carpet Success!")
+    
+    -- Explicitly call stopVelocityFlight to ensure clean state
+    stopVelocityFlight()
     
     return true
 end
