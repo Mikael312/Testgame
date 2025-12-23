@@ -142,6 +142,11 @@ local BOOGIE_ANIMATION_ID = "109061983885712"
 local unwalkAnimEnabled = false
 local unwalkAnimConnections = {}
 
+-- God Mode Variables (NEW)
+local godModeEnabled = false
+local healthConnection = nil
+local stateConnection = nil
+local initialMaxHealth = 100
 
 -- ==================== ALL FEATURE FUNCTIONS ====================
 -- (Pasted from previous response for brevity)
@@ -1670,7 +1675,73 @@ player.CharacterAdded:Connect(function(character)
     if unwalkAnimEnabled then
         setupNoWalkAnimation(character)
     end
-end)    
+end)
+
+-- ==================== GOD MODE FUNCTION (NEW) ====================
+local function toggleGodMode(enabled)
+    godModeEnabled = enabled
+    local character = player.Character -- Guna 'player' bukan 'LocalPlayer'
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+
+    if enabled then
+        print("✅ God Mode: ON")
+
+        if humanoid then
+            initialMaxHealth = humanoid.MaxHealth -- Simpan nyawa asal
+            humanoid.MaxHealth = math.huge
+            humanoid.Health = math.huge
+        end
+
+        -- Sambungan 1: Pulihkan nyawa seketika jika rosak
+        if healthConnection then healthConnection:Disconnect() end
+        if humanoid then
+            healthConnection = humanoid.HealthChanged:Connect(function(health)
+                if health < math.huge then
+                    humanoid.Health = math.huge
+                end
+            end)
+        end
+
+        -- Sambungan 2: Halang status mati (Dead)
+        if stateConnection then stateConnection:Disconnect() end
+        if humanoid then
+            stateConnection = humanoid.StateChanged:Connect(function(oldState, newState)
+                if newState == Enum.HumanoidStateType.Dead then
+                    humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+                    humanoid.Health = math.huge
+                end
+            end)
+        end
+
+    else
+        print("❌ God Mode: OFF")
+
+        -- Disconnect semua connection
+        if healthConnection then
+            healthConnection:Disconnect()
+            healthConnection = nil
+        end
+        if stateConnection then
+            stateConnection:Disconnect()
+            stateConnection = nil
+        end
+
+        -- Pulihkan nyawa asal
+        if humanoid then
+            humanoid.MaxHealth = initialMaxHealth
+            humanoid.Health = initialMaxHealth
+        end
+    end
+end
+
+-- TAMBAH INI: Untuk pastikan God Mode kekal selepas respawn
+player.CharacterAdded:Connect(function(newCharacter)
+    if godModeEnabled then
+        task.wait(1) -- Tunggu sebentar untuk humanoid dimuatkan
+        toggleGodMode(true) -- Aktifkan semula
+        print("🔄 God Mode re-enabled after respawn")
+    end
+end)
 
 -- ==================== EXTERNAL SCRIPT FUNCTIONS (UPDATED) ====================
 local function toggleUseCloner(state)
@@ -1740,5 +1811,6 @@ NightmareHub:AddMiscToggle("Touch Fling V2", function(state) toggleTouchFling(st
 NightmareHub:AddMiscToggle("Allow Friends", function(state) toggleAllowFriends(state) end)
 NightmareHub:AddMiscToggle("Silent Hit", function(state) toggleSilentHit(state) end) -- NEW
 NightmareHub:AddMiscToggle("Unwalk Anim", function(state) toggleUnwalkAnimation(state) end) -- NEW
+NightmareHub:AddMiscToggle("God Mode", function(state) toggleGodMode(state) end)
 
 print("🎮 NightmareHub Loaded Successfully!")
