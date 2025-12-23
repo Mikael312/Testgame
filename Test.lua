@@ -1405,7 +1405,7 @@ Workspace.ChildAdded:Connect(function(child)
 end)
 task.wait(1); scanForSentries()
 
--- ==================== BASE LINE FUNCTION (UPDATED - TARGETS LASER) ====================
+-- ==================== BASE LINE FUNCTION (UPDATED - TARGETS PLOT SIGN) ====================
 local function findPlayerPlot()
     local plots = workspace:FindFirstChild("Plots")
     if not plots then
@@ -1422,30 +1422,14 @@ local function findPlayerPlot()
                     local plotSignText = surfaceGui.Frame.TextLabel.Text
                     if plotSignText == playerBaseName then
                         print("✅ Found player's plot:", plot.Name)
-                        return plot
+                        return plot, plotSign -- Return both plot and its sign
                     end
                 end
             end
         end
     end
     warn("❌ Player's base not found!")
-    return nil
-end
-
--- [NEW] Function to find the Laser part
-local function findLaserPart(plot)
-    if not plot then return nil end
-    
-    -- Look for a child named "Laser" directly inside the plot model
-    local laser = plot:FindFirstChild("Laser")
-    
-    if laser and laser:IsA("BasePart") then
-        print("✅ Found Laser part:", laser.Name)
-        return laser
-    end
-    
-    warn("❌ Laser part not found in plot!")
-    return nil
+    return nil, nil
 end
 
 local function createPlotLine()
@@ -1454,22 +1438,16 @@ local function createPlotLine()
     local RootPart = Character:FindFirstChild("HumanoidRootPart")
     if not RootPart then return false end
 
-    local playerPlot = findPlayerPlot()
-    if not playerPlot then
-        warn("❌ Cannot find your base!")
+    -- [UPDATED] Get both the plot and the sign
+    local playerPlot, plotSign = findPlayerPlot()
+    if not playerPlot or not plotSign then
+        warn("❌ Cannot find your base or its sign!")
         return false
     end
 
-    -- [UPDATED] Use the new function to find the Laser part
-    local laserPart = findLaserPart(playerPlot)
-    if not laserPart then
-        warn("❌ Cannot find Laser part in your base!")
-        return false
-    end
-
-    -- [UPDATED] Get position directly from the Laser part
-    local targetPosition = laserPart.Position
-    print("📍 Creating line to Laser at:", targetPosition)
+    -- [UPDATED] Get position directly from the PlotSign part
+    local targetPosition = plotSign.Position
+    print("📍 Creating line to PlotSign at:", targetPosition)
 
     baseTargetPart = Instance.new("Part")
     baseTargetPart.Name = "PlotLineTarget"
@@ -1534,7 +1512,7 @@ local function createPlotLine()
         end
     end)
 
-    print("✅ Base line to Laser created!")
+    print("✅ Base line to PlotSign created!")
     return true
 end
 
