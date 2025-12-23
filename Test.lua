@@ -13,7 +13,7 @@
     - [UPDATED] Base Line now targets the "PlotSign" in the player's plot.
     - [ADDED] "Unwalk Anim" toggle to the Misc tab.
     - [ADDED] "God Mode" toggle to the Misc tab.
-    - [ADDED] "Auto Destroy Sentry" toggle to Main tab (New Feature).
+    - [ADDED] "Esp Trap" toggle to the Visual tab.
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -50,7 +50,7 @@ local originalTransparency = {}
 -- Brainrot ESP V3 variables (NEW - REPLACING Esp Best)
 local highestValueESP = nil
 local highestValueData = nil
-local espEnabled = false
+local espEnabled = false -- Used for Brainrot ESP
 local autoUpdateThread = nil
 local tracerAttachment0 = nil
 local tracerAttachment1 = nil
@@ -111,7 +111,7 @@ local BELL_SOUND_ID = "rbxassetid://3302969109"
 
 -- ESP Players Variables
 local espPlayersEnabled = false
-local espObjects = {}
+local espObjects = {} -- Used for Players ESP
 local updateConnection = nil
 
 -- Laser Cape (Aimbot) Variables
@@ -122,6 +122,11 @@ local autoLaserThread = nil
 local sentryESPEnabled = false
 local trackedSentries = {}
 local scanConnection = nil
+
+-- ESP Trap Variables (NEW)
+local espTrapEnabled = false
+local espTrapObjects = {}
+local espTrapConnection = nil
 
 -- Base Line Variables
 local baseLineEnabled = false
@@ -148,20 +153,6 @@ local godModeEnabled = false
 local healthConnection = nil
 local stateConnection = nil
 local initialMaxHealth = 100
-
--- Auto Destroy Sentry Variables (NEW)
-local sentryEnabled = false
-local sentryConn = nil
-local lightCheckConn = nil
-local activeSentries = {}
-local sentrySpawnTimes = {}
-local cachedBat = nil
-local batCacheTime = 0
-local NEW_SENTRY_DELAY = 4.0
-local MAX_HITS = 100
-local BAT_CACHE_DURATION = 5
-
--- ==================== ALL FEATURE FUNCTIONS ====================
 
 -- ==================== PLATFORM FUNCTION ====================
 local function createPlatform()
@@ -1424,6 +1415,125 @@ Workspace.ChildAdded:Connect(function(child)
 end)
 task.wait(1); scanForSentries()
 
+-- ==================== ESP TRAP FUNCTION (NEW) ====================
+local function addTrapHighlight(object, name)
+    -- Check if already highlighted
+    if object:FindFirstChild("ESP_Highlight_Trap") then return end
+    
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "ESP_Highlight_Trap"
+    highlight.Adornee = object
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    
+    -- All bright red for everything
+    highlight.FillColor = Color3.fromRGB(255, 0, 0) -- Bright red
+    highlight.OutlineColor = Color3.fromRGB(255, 50, 50) -- Bright red outline
+    
+    highlight.Parent = object
+    
+    table.insert(espTrapObjects, {Object = object, Highlight = highlight})
+    -- print("🎯 ESP Trap Added:", name) -- Optional log
+end
+
+local function removeTrapHighlight(object)
+    local highlight = object:FindFirstChild("ESP_Highlight_Trap")
+    if highlight then
+        highlight:Destroy()
+    end
+end
+
+local function findTrapTargets()
+    -- Clear old ESP objects
+    for _, data in pairs(espTrapObjects) do
+        if data.Highlight then
+            data.Highlight:Destroy()
+        end
+    end
+    espTrapObjects = {}
+    
+    -- Search workspace for targets
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") or obj:IsA("Part") or obj:IsA("MeshPart") then
+            local name = obj.Name:lower()
+            
+            -- Check if it's a Subspace Mine or Trap
+            if name:find("subspace") and name:find("mine") then
+                addTrapHighlight(obj, obj.Name)
+            elseif name:find("trap") then
+                addTrapHighlight(obj, obj.Name)
+            elseif name:find("mine") and not name:find("mining") then
+                -- Also catch generic "mine" objects
+                addTrapHighlight(obj, obj.Name)
+            end
+        end
+    end
+    
+    -- print("✅ Found " .. #espTrapObjects .. " trap objects") -- Optional log
+end
+
+local function enableEspTrap()
+    if espTrapEnabled then return end
+    espTrapEnabled = true
+    
+    print("🔍 ESP Trap Started - Searching...")
+    
+    -- Initial scan
+    findTrapTargets()
+    
+    -- Continuous monitoring for new objects
+    espTrapConnection = RunService.Heartbeat:Connect(function()
+        if not espTrapEnabled then return end
+        
+        -- Check for new objects every 2 seconds (approx 0.016s frame time)
+        if tick() % 2 < 0.016 then
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("Model") or obj:IsA("Part") or obj:IsA("MeshPart") then
+                    local name = obj.Name:lower()
+                    
+                    if (name:find("subspace") and name:find("mine")) or 
+                       name:find("trap") or 
+                       (name:find("mine") and not name:find("mining")) then
+                        
+                        -- Only add if not already highlighted
+                        if not obj:FindFirstChild("ESP_Highlight_Trap") then
+                            addTrapHighlight(obj, obj.Name)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function disableEspTrap()
+    espTrapEnabled = false
+    
+    if espTrapConnection then
+        espTrapConnection:Disconnect()
+        espTrapConnection = nil
+    end
+    
+    -- Remove all highlights
+    for _, data in pairs(espTrapObjects) do
+        if data.Highlight then
+            data.Highlight:Destroy()
+        end
+    end
+    espTrapObjects = {}
+    
+    -- Clean up any remaining highlights in workspace
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        removeTrapHighlight(obj)
+    end
+    
+    print("🛑 ESP Trap Stopped")
+end
+
+local function toggleEspTrap(state)
+    if state then enableEspTrap() else disableEspTrap() end
+end
+
 -- ==================== BASE LINE FUNCTION (UPDATED - TARGETS PLOT SIGN) ====================
 local function findPlayerPlot()
     local plots = workspace:FindFirstChild("Plots")
@@ -1786,332 +1896,6 @@ local function toggleSilentHit(state)
     if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Silenthit.lua"))() end); print("✅ Silent Hit: ON") else print("❌ Silent Hit: OFF") end
 end
 
--- ==================== AUTO DESTROY SENTRY FUNCTIONS (NEW) ====================
-local function isOwnedByPlayer(sentry)
-    local sentryName = sentry.Name
-    local myUserId = tostring(player.UserId)
-    
-    if string.find(sentryName, myUserId) then
-        print("[🔍] MATCH! UserId found in sentry name: " .. sentryName)
-        return true
-    end
-    
-    print("[🔍] No UserId match in name: " .. sentryName .. " (Your ID: " .. myUserId .. ")")
-    
-    if string.find(sentryName:lower(), player.Name:lower()) then
-        print("[🔍] Player name found in sentry name!")
-        return true
-    end
-    
-    local function searchForOwner(parent)
-        for _, child in ipairs(parent:GetDescendants()) do
-            if child.Name == "Owner" or child.Name == "Creator" or child.Name == "PlacedBy" then
-                if child:IsA("ObjectValue") and child.Value == player then
-                    print("[🔍] Found ObjectValue owner match!")
-                    return true
-                elseif child:IsA("StringValue") and (child.Value == player.Name or child.Value == myUserId) then
-                    print("[🔍] Found StringValue owner match!")
-                    return true
-                elseif (child:IsA("IntValue") or child:IsA("NumberValue")) and child.Value == player.UserId then
-                    print("[🔍] Found UserId match!")
-                    return true
-                end
-            end
-        end
-        return false
-    end
-    
-    if searchForOwner(sentry) then
-        return true
-    end
-    
-    local possibleAttributes = {"PlayerUserId", "UserId", "CreatorId", "PlacedByUserId", "PlayerId", "Owner", "Creator"}
-    for _, attrName in ipairs(possibleAttributes) do
-        local attrValue = sentry:GetAttribute(attrName)
-        if attrValue then
-            if attrValue == player.UserId or attrValue == myUserId or attrValue == player.Name then
-                print("[🔍] Attribute match via " .. attrName)
-                return true
-            end
-        end
-    end
-    
-    print("[🔍] Enemy sentry confirmed!")
-    return false
-end
-
-local function findBat()
-    local currentTime = tick()
-    if cachedBat and cachedBat.Parent and (currentTime - batCacheTime) < BAT_CACHE_DURATION then
-        return cachedBat
-    end
-    
-    local tool = nil
-    pcall(function()
-        tool = player.Backpack:FindFirstChild("Bat")
-        if not tool and player.Character then
-            tool = player.Character:FindFirstChild("Bat")
-        end
-    end)
-    
-    if tool then
-        cachedBat = tool
-        batCacheTime = currentTime
-    end
-    
-    return tool
-end
-
-local function equipBat()
-    local bat = findBat()
-    if bat and bat.Parent == player.Backpack then
-        pcall(function()
-            player.Character.Humanoid:EquipTool(bat)
-        end)
-        return true
-    end
-    return bat and bat.Parent == player.Character
-end
-
-local function unequipBat()
-    local bat = findBat()
-    if bat and bat.Parent == player.Character then
-        pcall(function()
-            player.Character.Humanoid:UnequipTools()
-        end)
-    end
-end
-
-local function destroySentry(desc, isNewlyPlaced)
-    if not sentryEnabled then return end
-    if activeSentries[desc] then return end
-    
-    if isOwnedByPlayer(desc) then
-        print("[🛡️] Skipping own sentry: " .. desc.Name)
-        return
-    end
-    
-    local char = player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = char.HumanoidRootPart
-
-    activeSentries[desc] = true
-
-    if not desc.Parent or not sentryEnabled then 
-        activeSentries[desc] = nil
-        return 
-    end
-
-    if isNewlyPlaced then
-        print("[⏳] New enemy sentry detected - waiting 4.0s...")
-        task.wait(NEW_SENTRY_DELAY)
-        
-        if not desc.Parent or not sentryEnabled then
-            activeSentries[desc] = nil
-            return
-        end
-        
-        if isOwnedByPlayer(desc) then
-            print("[🛡️] Sentry became ours - skipping!")
-            activeSentries[desc] = nil
-            return
-        end
-        
-        print("[✅] Wait complete - engaging!")
-    end
-
-    print("[💎] HYBRID BYPASS - Enemy sentry locked!")
-    print("[🔥] Attacking until destroyed...")
-
-    local bat = findBat()
-    if not bat then
-        warn("[⚠️] Bat not found!")
-        activeSentries[desc] = nil
-        return
-    end
-
-    local hitCount = 0
-    local running = true
-    
-    task.spawn(function()
-        while running and sentryEnabled and desc.Parent do
-            equipBat()
-            task.wait(0.05)
-            if not running then break end
-            unequipBat()
-            task.wait(0.05)
-        end
-    end)
-    
-    task.spawn(function()
-        task.wait(0.1)
-        
-        local spamConnection
-        local frameSkip = 0
-        
-        spamConnection = RunService.Heartbeat:Connect(function()
-            frameSkip = frameSkip + 1
-            if frameSkip % 2 == 0 then
-                return
-            end
-            
-            if not sentryEnabled or not desc.Parent or hitCount >= MAX_HITS then
-                running = false
-                if spamConnection then
-                    spamConnection:Disconnect()
-                end
-                unequipBat()
-                activeSentries[desc] = nil
-                sentrySpawnTimes[desc] = nil
-                cachedBat = nil
-                
-                if not desc.Parent then
-                    print("[✅] Enemy sentry DESTROYED! Total hits: " .. hitCount)
-                else
-                    print("[⏹️] Attack stopped. Hits: " .. hitCount)
-                end
-                return
-            end
-            
-            local currentChar = player.Character
-            if currentChar and currentChar:FindFirstChild("HumanoidRootPart") then
-                local currentHrp = currentChar.HumanoidRootPart
-                local lookVector = currentHrp.CFrame.LookVector
-                local targetPos = currentHrp.Position + lookVector * 3.5 + Vector3.new(0, 1.2, 0)
-                
-                pcall(function()
-                    if desc:IsA("Model") and desc.PrimaryPart then
-                        local currentCFrame = desc.PrimaryPart.CFrame
-                        local newCFrame = CFrame.new(targetPos) * (currentCFrame - currentCFrame.Position)
-                        desc:SetPrimaryPartCFrame(newCFrame)
-                    elseif desc:IsA("BasePart") then
-                        local currentCFrame = desc.CFrame
-                        desc.CFrame = CFrame.new(targetPos) * (currentCFrame - currentCFrame.Position)
-                    end
-                end)
-            end
-            
-            local currentBat = findBat()
-            if currentBat and currentBat.Parent == player.Character then
-                for i = 1, 12 do
-                    if currentBat.Parent == player.Character and desc.Parent then
-                        currentBat:Activate()
-                        hitCount = hitCount + 1
-                    else
-                        break
-                    end
-                end
-            end
-        end)
-    end)
-end
-
-local function lightweightCheck()
-    if not sentryEnabled then return end
-    
-    for _, child in ipairs(workspace:GetChildren()) do
-        if sentryEnabled and (child:IsA("Model") or child:IsA("BasePart")) then
-            if string.find(child.Name:lower(), "sentry") and not activeSentries[child] and child.Parent then
-                if not isOwnedByPlayer(child) then
-                    print("[🔍] Periodic check found enemy sentry!")
-                    task.spawn(function()
-                        destroySentry(child, false)
-                    end)
-                end
-            end
-        end
-    end
-    
-    local folders = {"Map", "Assets", "Entities", "NPCs", "Spawns"}
-    for _, folderName in ipairs(folders) do
-        local folder = workspace:FindFirstChild(folderName)
-        if folder then
-            for _, child in ipairs(folder:GetChildren()) do
-                if sentryEnabled and (child:IsA("Model") or child:IsA("BasePart")) then
-                    if string.find(child.Name:lower(), "sentry") and not activeSentries[child] and child.Parent then
-                        if not isOwnedByPlayer(child) then
-                            task.spawn(function()
-                                destroySentry(child, false)
-                            end)
-                            break
-                        end
-                    end
-                end
-            end
-        end
-    end
-end
-
-local function startSentryWatch()
-    if sentryConn then sentryConn:Disconnect() end
-    if lightCheckConn then lightCheckConn:Disconnect() end
-    
-    sentryConn = workspace.DescendantAdded:Connect(function(desc)
-        if not sentryEnabled then return end
-        if not desc:IsA("Model") and not desc:IsA("BasePart") then return end
-        
-        if string.find(desc.Name:lower(), "sentry") then
-            print("[🆕] Event detected NEW sentry - checking ownership...")
-            
-            if desc.Parent and sentryEnabled and not activeSentries[desc] then
-                if not isOwnedByPlayer(desc) then
-                    print("[⚔️] Enemy sentry confirmed - will wait 4.0s!")
-                    sentrySpawnTimes[desc] = tick()
-                    
-                    task.spawn(function()
-                        destroySentry(desc, true)
-                    end)
-                else
-                    print("[🛡️] Own sentry detected - ignoring!")
-                end
-            end
-        end
-    end)
-    
-    lightCheckConn = RunService.Heartbeat:Connect(function()
-        if not sentryEnabled then return end
-        task.wait(1.2)
-        lightweightCheck()
-    end)
-    
-    task.spawn(function()
-        print("[🔍] Initial sentry sweep...")
-        lightweightCheck()
-        print("[✅] Initial sweep complete!")
-    end)
-end
-
-local function stopSentryWatch()
-    sentryEnabled = false
-    
-    if sentryConn then
-        sentryConn:Disconnect()
-        sentryConn = nil
-    end
-    
-    if lightCheckConn then
-        lightCheckConn:Disconnect()
-        lightCheckConn = nil
-    end
-    
-    activeSentries = {}
-    sentrySpawnTimes = {}
-    cachedBat = nil
-    unequipBat()
-end
-
-local function toggleAutoDestroySentry(state)
-    if state then
-        sentryEnabled = true
-        startSentryWatch()
-        print("✅ Auto Destroy Sentry: ON")
-    else
-        sentryEnabled = false
-        stopSentryWatch()
-        print("❌ Auto Destroy Sentry: OFF")
-    end
-end
-
 -- ==================== CREATE UI AND ADD TOGGLES ====================
 NightmareHub:CreateUI()
 
@@ -2128,7 +1912,6 @@ NightmareHub:AddMainToggle("Baselock Reminder", function(state) toggleBaselockRe
 NightmareHub:AddMainToggle("Websling Control", function(state) toggleWebslingControl(state) end)
 NightmareHub:AddMainToggle("Admin Panel Spammer", function(state) toggleAdminPanelSpammer(state) end) -- CHANGED
 NightmareHub:AddMainToggle("Instant Grab", function(state) toggleInstantGrab(state) end) -- Nama toggle tidak berubah
-NightmareHub:AddMainToggle("Auto Destroy Sentry", function(state) toggleAutoDestroySentry(state) end) -- ADDED
 
 -- VISUAL TAB
 NightmareHub:AddVisualToggle("Esp Players", function(state) toggleESPPlayers(state) end)
@@ -2136,6 +1919,7 @@ NightmareHub:AddVisualToggle("Esp Best", function(state) toggleEspBest(state) en
 NightmareHub:AddVisualToggle("Esp Base Timer", function(state) toggleEspBaseTimer(state) end)
 NightmareHub:AddVisualToggle("Base Line", function(state) toggleBaseLine(state) end)
 NightmareHub:AddVisualToggle("Esp Turret", function(state) toggleSentryESP(state) end)
+NightmareHub:AddVisualToggle("Esp Trap", function(state) toggleEspTrap(state) end) -- NEW
 
 -- MISC TAB
 NightmareHub:AddMiscToggle("Anti Debuff", function(state) toggleAntiDebuff(state) end)
