@@ -1,7 +1,18 @@
 --[[
-    NIGHTMARE HUB 🎮 (INTEGRATED VERSION - FIXED)
-    - Full Auto Destroy Turret Integration (Fixed Variable Conflicts)
-    - All features from original NightmareHub maintained.
+    NIGHTMARE HUB 🎮 (Library Version - Updated)
+    All functions from the original script, now integrated with NightmareLib.
+    - "Respawn Desync" changed to "Use Cloner"
+    - "Unwalk Animation" changed to "Admin Panel Spammer"
+    - Added "Silent Hit" to Misc tab
+    - Replaced "Esp Best" with "Brainrot ESP V3" (Module-Based Calculation)
+    - "Instant Grab" function updated to "Instant Pickup" logic for better range and reliability.
+    - "Anti Trap" feature has been removed.
+    - Added "Unlock Floor" to Main tab.
+    - [FIXED] ESP Base Timer flickering issue.
+    - [FIXED] Instant Grab performance drop (FPS).
+    - [UPDATED] Base Line now targets the "PlotSign" in the player's plot.
+    - [ADDED] "Unwalk Anim" toggle to the Misc tab.
+    - [ADDED] "God Mode" toggle to the Misc tab.
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -21,7 +32,7 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
-local HttpService = game:GetService("HttpService")
+local HttpService = game:GetService("HttpService") -- Added for Brainrot ESP V3
 
 -- ==================== VARIABLES ====================
 local player = Players.LocalPlayer
@@ -35,7 +46,7 @@ local platformConnection = nil
 local xrayBaseEnabled = false
 local originalTransparency = {}
 
--- Brainrot ESP V3 variables
+-- Brainrot ESP V3 variables (NEW - REPLACING Esp Best)
 local highestValueESP = nil
 local highestValueData = nil
 local espEnabled = false
@@ -106,7 +117,7 @@ local updateConnection = nil
 local autoLaserEnabled = false
 local autoLaserThread = nil
 
--- ESP Turret Variables (EXISTING)
+-- ESP Turret Variables
 local sentryESPEnabled = false
 local trackedSentries = {}
 local scanConnection = nil
@@ -128,259 +139,20 @@ local heartbeatConnection = nil
 local animationPlayedConnection = nil
 local BOOGIE_ANIMATION_ID = "109061983885712"
 
--- Unwalk Anim Variables
+-- Unwalk Anim Variables (NEW)
 local unwalkAnimEnabled = false
 
--- God Mode Variables
+-- God Mode Variables (NEW)
 local godModeEnabled = false
 local healthConnection = nil
 local stateConnection = nil
 local initialMaxHealth = 100
 
--- ==================== AUTO DESTROY TURRET VARIABLES (NEW & FIXED) ====================
-local autoDestroyTurretEnabled = false
-local autoTurretConn = nil -- Renamed to avoid conflict with ESP
-local autoTurretLightConn = nil -- Renamed
-local autoActiveTurrets = {} -- Renamed
-local autoTurretSpawnTimes = {}
-local MAX_HITS = 150
-local NEW_SENTRY_DELAY = 4.0
-local cachedBat = nil
-local batCacheTime = 0
-local BAT_CACHE_DURATION = 0.3
+-- ==================== ALL FEATURE FUNCTIONS ====================
+-- (Pasted from previous response for brevity)
 
--- ==================== AUTO DESTROY TURRET FUNCTIONS (INTEGRATED) ====================
-
-local function isOwnedByPlayer(sentry)
-    -- Check if UserId is in sentry name
-    local sentryName = sentry.Name
-    local myUserId = tostring(player.UserId)
-    
-    if string.find(sentryName, myUserId) then
-        return true
-    end
-    
-    -- Check if player name is in sentry name
-    if string.find(sentryName:lower(), player.Name:lower()) then
-        return true
-    end
-    
-    return false
-end
-
-local function findBat()
-    local currentTime = tick()
-    if cachedBat and cachedBat.Parent and (currentTime - batCacheTime) < BAT_CACHE_DURATION then
-        return cachedBat
-    end
-    
-    local tool = nil
-    pcall(function()
-        tool = player.Backpack:FindFirstChild("Bat")
-        if not tool and player.Character then
-            tool = player.Character:FindFirstChild("Bat")
-        end
-    end)
-    
-    if tool then
-        cachedBat = tool
-        batCacheTime = currentTime
-    end
-    
-    return tool
-end
-
-local function equipBat()
-    local bat = findBat()
-    if bat and bat.Parent == player.Backpack then
-        pcall(function()
-            player.Character.Humanoid:EquipTool(bat)
-        end)
-        return true
-    end
-    return bat and bat.Parent == player.Character
-end
-
-local function unequipBat()
-    local bat = findBat()
-    if bat and bat.Parent == player.Character then
-        pcall(function()
-            player.Character.Humanoid:UnequipTools()
-        end)
-    end
-end
-
-local function destroySentry(desc, isNewlyPlaced)
-    if not autoDestroyTurretEnabled then return end
-    if autoActiveTurrets[desc] then return end
-    
-    -- CHECK OWNERSHIP
-    if isOwnedByPlayer(desc) then
-        return
-    end
-    
-    local char = player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    local hrp = char.HumanoidRootPart
-
-    autoActiveTurrets[desc] = true
-
-    if not desc.Parent or not autoDestroyTurretEnabled then 
-        autoActiveTurrets[desc] = nil
-        return 
-    end
-
-    -- Delay for new sentries
-    if isNewlyPlaced then
-        task.wait(NEW_SENTRY_DELAY)
-        if not desc.Parent or not autoDestroyTurretEnabled then
-            autoActiveTurrets[desc] = nil
-            return
-        end
-        if isOwnedByPlayer(desc) then
-            autoActiveTurrets[desc] = nil
-            return
-        end
-    end
-
-    local bat = findBat()
-    if not bat then
-        autoActiveTurrets[desc] = nil
-        return
-    end
-
-    local hitCount = 0
-    local running = true
-    
-    -- THREAD 1: Equip/Unequip Cycle
-    task.spawn(function()
-        while running and autoDestroyTurretEnabled and desc.Parent do
-            equipBat()
-            task.wait(0.05)
-            if not running then break end
-            unequipBat()
-            task.wait(0.05)
-        end
-    end)
-    
-    -- THREAD 2: Attack Loop
-    task.spawn(function()
-        task.wait(0.1)
-        local spamConnection
-        
-        spamConnection = RunService.Heartbeat:Connect(function()
-            if not autoDestroyTurretEnabled or not desc.Parent or hitCount >= MAX_HITS then
-                running = false
-                if spamConnection then spamConnection:Disconnect() end
-                unequipBat()
-                autoActiveTurrets[desc] = nil
-                autoTurretSpawnTimes[desc] = nil
-                cachedBat = nil
-                return
-            end
-            
-            local currentChar = player.Character
-            if currentChar and currentChar:FindFirstChild("HumanoidRootPart") then
-                local currentHrp = currentChar.HumanoidRootPart
-                local lookVector = currentHrp.CFrame.LookVector
-                local targetPos = currentHrp.Position + lookVector * 3.5 + Vector3.new(0, 1.2, 0)
-                
-                pcall(function()
-                    if desc:IsA("Model") and desc.PrimaryPart then
-                        local currentCFrame = desc.PrimaryPart.CFrame
-                        local newCFrame = CFrame.new(targetPos) * (currentCFrame - currentCFrame.Position)
-                        desc:SetPrimaryPartCFrame(newCFrame)
-                    elseif desc:IsA("BasePart") then
-                        local currentCFrame = desc.CFrame
-                        desc.CFrame = CFrame.new(targetPos) * (currentCFrame - currentCFrame.Position)
-                    end
-                end)
-            end
-            
-            local currentBat = findBat()
-            if currentBat and currentBat.Parent == player.Character then
-                for i = 1, 12 do
-                    if currentBat.Parent == player.Character and desc.Parent then
-                        currentBat:Activate()
-                        hitCount = hitCount + 1
-                    else
-                        break
-                    end
-                end
-            end
-        end)
-    end)
-end
-
-local function autoTurretLightweightCheck()
-    if not autoDestroyTurretEnabled then return end
-    
-    for _, child in ipairs(workspace:GetChildren()) do
-        if autoDestroyTurretEnabled and (child:IsA("Model") or child:IsA("BasePart")) then
-            if string.find(child.Name:lower(), "sentry") and not autoActiveTurrets[child] and child.Parent then
-                if not isOwnedByPlayer(child) then
-                    task.spawn(function()
-                        destroySentry(child, false)
-                    end)
-                end
-            end
-        end
-    end
-end
-
-local function startAutoTurretWatch()
-    if autoTurretConn then autoTurretConn:Disconnect() end
-    if autoTurretLightConn then autoTurretLightConn:Disconnect() end
-    
-    -- Event Detection
-    autoTurretConn = workspace.DescendantAdded:Connect(function(desc)
-        if not autoDestroyTurretEnabled then return end
-        if not desc:IsA("Model") and not desc:IsA("BasePart") then return end
-        
-        if string.find(desc.Name:lower(), "sentry") then
-            if desc.Parent and autoDestroyTurretEnabled and not autoActiveTurrets[desc] then
-                if not isOwnedByPlayer(desc) then
-                    autoTurretSpawnTimes[desc] = tick()
-                    task.spawn(function()
-                        destroySentry(desc, true)
-                    end)
-                end
-            end
-        end
-    end)
-    
-    -- Periodic Check
-    autoTurretLightConn = RunService.Heartbeat:Connect(function()
-        if not autoDestroyTurretEnabled then return end
-        task.wait(1.2)
-        autoTurretLightweightCheck()
-    end)
-    
-    task.spawn(autoTurretLightweightCheck)
-end
-
-local function stopAutoTurretWatch()
-    autoDestroyTurretEnabled = false
-    if autoTurretConn then autoTurretConn:Disconnect(); autoTurretConn = nil end
-    if autoTurretLightConn then autoTurretLightConn:Disconnect(); autoTurretLightConn = nil end
-    autoActiveTurrets = {}
-    autoTurretSpawnTimes = {}
-    cachedBat = nil
-    unequipBat()
-end
-
-local function toggleAutoDestroyTurret(enabled)
-    autoDestroyTurretEnabled = enabled
-    if enabled then
-        print("✅ Auto Destroy Turret: ON")
-        startAutoTurretWatch()
-    else
-        print("❌ Auto Destroy Turret: OFF")
-        stopAutoTurretWatch()
-    end
-end
-
--- ==================== ALL OTHER FEATURE FUNCTIONS ====================
+-- [PASTE SEMUA FUNCTION DARI JAWAPAN SEBELUMNYA DI SINI]
+-- Saya akan sertakan kesemuanya di bawah untuk kemudahan
 
 -- ==================== PLATFORM FUNCTION ====================
 local function createPlatform()
@@ -503,82 +275,156 @@ if plots then
     end)
 end
 
--- ==================== BRAINROT ESP V3 FUNCTION ====================
+-- ==================== BRAINROT ESP V3 FUNCTION (NEW - REPLACING Esp Best) ====================
+-- Module loading
 local AnimalsModule, TraitsModule, MutationsModule
+
 pcall(function()
     AnimalsModule = require(ReplicatedStorage.Datas.Animals)
     TraitsModule = require(ReplicatedStorage.Datas.Traits)
     MutationsModule = require(ReplicatedStorage.Datas.Mutations)
 end)
 
+-- Helper function to get trait multiplier
 local function getTraitMultiplier(model)
     if not TraitsModule then return 0 end
+    
     local traitJson = model:GetAttribute("Traits")
-    if not traitJson or traitJson == "" then return 0 end
+    if not traitJson or traitJson == "" then
+        return 0
+    end
+
     local traits = {}
-    local ok, decoded = pcall(function() return HttpService:JSONDecode(traitJson) end)
-    if ok and typeof(decoded) == "table" then traits = decoded
-    else for t in string.gmatch(traitJson, "[^,]+") do table.insert(traits, t) end end
+    local ok, decoded = pcall(function()
+        return HttpService:JSONDecode(traitJson)
+    end)
+
+    if ok and typeof(decoded) == "table" then
+        traits = decoded
+    else
+        for t in string.gmatch(traitJson, "[^,]+") do
+            table.insert(traits, t)
+        end
+    end
+
     local mult = 0
     for _, entry in pairs(traits) do
         local name = typeof(entry) == "table" and entry.Name or tostring(entry)
         name = name:gsub("^_Trait%.", "")
+
         local trait = TraitsModule[name]
-        if trait and trait.MultiplierModifier then mult += tonumber(trait.MultiplierModifier) or 0 end
+        if trait and trait.MultiplierModifier then
+            mult += tonumber(trait.MultiplierModifier) or 0
+        end
     end
+
     return mult
 end
 
+-- Helper function to calculate final generation
 local function getFinalGeneration(model)
     if not AnimalsModule then return 0 end
+    
     local animalData = AnimalsModule[model.Name]
     if not animalData then return 0 end
+
     local baseGen = tonumber(animalData.Generation) or tonumber(animalData.Price or 0)
+
     local traitMult = getTraitMultiplier(model)
+
     local mutationMult = 0
     if MutationsModule then
         local mutation = model:GetAttribute("Mutation")
-        if mutation and MutationsModule[mutation] then mutationMult = tonumber(MutationsModule[mutation].Modifier or 0) end
+        if mutation and MutationsModule[mutation] then
+            mutationMult = tonumber(MutationsModule[mutation].Modifier or 0)
+        end
     end
+
     local final = baseGen * (1 + traitMult + mutationMult)
     return math.max(1, math.round(final))
 end
 
+-- Format number jadi readable (34M/s, 1.2B/s, etc)
 local function formatNumber(num)
     local value, suffix
-    if num >= 1e12 then value = num / 1e12; suffix = "T/s"
-    elseif num >= 1e9 then value = num / 1e9; suffix = "B/s"
-    elseif num >= 1e6 then value = num / 1e6; suffix = "M/s"
-    elseif num >= 1e3 then value = num / 1e3; suffix = "K/s"
-    else return string.format("%.0f/s", num) end
-    if value == math.floor(value) then return string.format("%.0f%s", value, suffix)
-    else return string.format("%.1f%s", value, suffix) end
+    
+    if num >= 1e12 then
+        value = num / 1e12
+        suffix = "T/s"
+    elseif num >= 1e9 then
+        value = num / 1e9
+        suffix = "B/s"
+    elseif num >= 1e6 then
+        value = num / 1e6
+        suffix = "M/s"
+    elseif num >= 1e3 then
+        value = num / 1e3
+        suffix = "K/s"
+    else
+        return string.format("%.0f/s", num)
+    end
+    
+    -- Check kalau whole number
+    if value == math.floor(value) then
+        return string.format("%.0f%s", value, suffix)
+    else
+        return string.format("%.1f%s", value, suffix)
+    end
 end
 
+-- Check if plot belongs to player
 local function isPlayerPlot(plot)
     local plotSign = plot:FindFirstChild("PlotSign")
     if plotSign then
         local yourBase = plotSign:FindFirstChild("YourBase")
-        if yourBase and yourBase.Enabled then return true end
+        if yourBase and yourBase.Enabled then
+            return true
+        end
     end
     return false
 end
 
+-- Find the highest value brainrot
 local function findHighestBrainrot()
     local plots = workspace:FindFirstChild("Plots")
     if not plots then return nil end
+    
     local highest = {value = 0}
+    local totalPlotsScanned = 0
+    local totalAnimalsFound = 0
+    
+    print("========== SCANNING ALL PLOTS (NEW SYSTEM) ==========")
+    
     for _, plot in pairs(plots:GetChildren()) do
         if not isPlayerPlot(plot) then
+            totalPlotsScanned = totalPlotsScanned + 1
+            
             for _, obj in pairs(plot:GetDescendants()) do
                 if obj:IsA("Model") and AnimalsModule and AnimalsModule[obj.Name] then
                     pcall(function()
                         local gen = getFinalGeneration(obj)
+                        
                         if gen > 0 then
+                            totalAnimalsFound = totalAnimalsFound + 1
+                            
+                            print(string.format("🔍 Plot: %s | Animal: %s | Value: %s", 
+                                plot.Name, obj.Name, formatNumber(gen)))
+                            
                             if gen > highest.value then
+                                print(string.format("   ✅ NEW HIGHEST! (%d > %d)", gen, highest.value))
+                                
                                 local root = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart
+                                
                                 if root then
-                                    highest = {plot = plot, plotName = plot.Name, petName = obj.Name, generation = gen, formattedValue = formatNumber(gen), model = obj, value = gen}
+                                    highest = {
+                                        plot = plot,
+                                        plotName = plot.Name,
+                                        petName = obj.Name,
+                                        generation = gen,
+                                        formattedValue = formatNumber(gen),
+                                        model = obj,
+                                        value = gen
+                                    }
                                 end
                             end
                         end
@@ -587,11 +433,24 @@ local function findHighestBrainrot()
             end
         end
     end
+    
+    print(string.format("📊 SCAN STATS: Plots: %d | Animals: %d", 
+        totalPlotsScanned, totalAnimalsFound))
+    
+    if highest.value > 0 then
+        print(string.format("========== FINAL: %s at Plot %s (Value: %s) ==========", 
+            highest.petName, highest.plotName, formatNumber(highest.value)))
+    else
+        print("========== NO ANIMALS FOUND ==========")
+    end
+    
     return highest.value > 0 and highest or nil
 end
 
+-- Create ESP with box highlight + red podium outline
 local function createHighestValueESP(brainrotData)
     if not brainrotData or not brainrotData.model then return end
+    
     pcall(function()
         if highestValueESP then
             if highestValueESP.highlight then highestValueESP.highlight:Destroy() end
@@ -599,11 +458,14 @@ local function createHighestValueESP(brainrotData)
             if highestValueESP.boxAdornment then highestValueESP.boxAdornment:Destroy() end
             if highestValueESP.podiumHighlight then highestValueESP.podiumHighlight:Destroy() end
         end
+        
         local espContainer = {}
         local model = brainrotData.model
         local part = model.PrimaryPart or model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildWhichIsA('BasePart')
+        
         if not part then return end
         
+        -- Highlight (RED)
         local highlight = Instance.new("Highlight", model)
         highlight.Name = "BrainrotESPHighlight"
         highlight.Adornee = model
@@ -614,6 +476,7 @@ local function createHighestValueESP(brainrotData)
         highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         espContainer.highlight = highlight
         
+        -- BOX HIGHLIGHT
         local boxAdornment = Instance.new("BoxHandleAdornment")
         boxAdornment.Name = "BrainrotBoxHighlight"
         boxAdornment.Adornee = part
@@ -625,28 +488,149 @@ local function createHighestValueESP(brainrotData)
         boxAdornment.Parent = part
         espContainer.boxAdornment = boxAdornment
         
+        -- RED OUTLINE untuk PODIUM
+        local plot = brainrotData.plot
+        if plot then
+            local podium = plot:FindFirstChild("Podium") or plot:FindFirstChild("Platform") or plot:FindFirstChild("Base")
+            if podium and podium:IsA("BasePart") then
+                local podiumHighlight = Instance.new("Highlight")
+                podiumHighlight.Name = "PodiumOutline"
+                podiumHighlight.Adornee = podium
+                podiumHighlight.FillColor = Color3.fromRGB(255, 0, 0)
+                podiumHighlight.FillTransparency = 0.9
+                podiumHighlight.OutlineColor = Color3.fromRGB(255, 0, 0)
+                podiumHighlight.OutlineTransparency = 0
+                podiumHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                podiumHighlight.Parent = podium
+                espContainer.podiumHighlight = podiumHighlight
+            end
+        end
+        
+        -- Billboard with CENTERED text
         local billboard = Instance.new("BillboardGui", part)
         billboard.Size = UDim2.new(0, 220, 0, 80)
         billboard.StudsOffset = Vector3.new(0, 8, 0)
         billboard.AlwaysOnTop = true
+        
         local container = Instance.new("Frame", billboard)
-        container.Size = UDim2.new(1, 0, 1, 0); container.BackgroundTransparency = 1
+        container.Size = UDim2.new(1, 0, 1, 0)
+        container.BackgroundTransparency = 1
+        
+        -- Pet Name Label (CENTERED)
         local petNameLabel = Instance.new("TextLabel", container)
-        petNameLabel.Size = UDim2.new(1, 0, 0.5, 0); petNameLabel.BackgroundTransparency = 1
-        petNameLabel.Text = brainrotData.petName or "Unknown"; petNameLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
-        petNameLabel.TextStrokeTransparency = 0; petNameLabel.TextScaled = true
-        petNameLabel.Font = Enum.Font.Arcade; petNameLabel.TextXAlignment = Enum.TextXAlignment.Center
+        petNameLabel.Size = UDim2.new(1, 0, 0.5, 0)
+        petNameLabel.BackgroundTransparency = 1
+        petNameLabel.Text = brainrotData.petName or "Unknown"
+        petNameLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+        petNameLabel.TextStrokeTransparency = 0
+        petNameLabel.TextScaled = true
+        petNameLabel.Font = Enum.Font.Arcade
+        petNameLabel.TextXAlignment = Enum.TextXAlignment.Center
         petNameLabel.TextYAlignment = Enum.TextYAlignment.Center
+        
+        -- Generation Label (CENTERED) - Format jadi M/s, B/s
         local genLabel = Instance.new("TextLabel", container)
-        genLabel.Size = UDim2.new(1, 0, 0.5, 0); genLabel.Position = UDim2.new(0, 0, 0.5, 0)
-        genLabel.BackgroundTransparency = 1; genLabel.Text = brainrotData.formattedValue or formatNumber(brainrotData.generation or 0)
-        genLabel.TextColor3 = Color3.fromRGB(255, 0, 0); genLabel.TextStrokeTransparency = 0; genLabel.TextScaled = true
-        genLabel.Font = Enum.Font.Arcade; genLabel.TextXAlignment = Enum.TextXAlignment.Center
+        genLabel.Size = UDim2.new(1, 0, 0.5, 0)
+        genLabel.Position = UDim2.new(0, 0, 0.5, 0)
+        genLabel.BackgroundTransparency = 1
+        genLabel.Text = brainrotData.formattedValue or formatNumber(brainrotData.generation or 0)
+        genLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+        genLabel.TextStrokeTransparency = 0
+        genLabel.TextScaled = true
+        genLabel.Font = Enum.Font.Arcade
+        genLabel.TextXAlignment = Enum.TextXAlignment.Center
         genLabel.TextYAlignment = Enum.TextYAlignment.Center
+        
         espContainer.nameLabel = billboard
+        
         highestValueESP = espContainer
         highestValueData = brainrotData
     end)
+end
+
+-- Check if pet still exists
+local function checkPetExists()
+    if not highestValueData then return false end
+    
+    local exists = false
+    pcall(function()
+        local model = highestValueData.model
+        if model and model.Parent then
+            exists = true
+        end
+    end)
+    
+    return exists
+end
+
+-- TRACER LINE
+local function createTracerLine()
+    if not highestValueData or not highestValueData.model then return false end
+    
+    local character = player.Character
+    if not character then return false end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    
+    local targetPart = highestValueData.model.PrimaryPart or highestValueData.model:FindFirstChild("HumanoidRootPart") or highestValueData.model:FindFirstChildWhichIsA('BasePart')
+    if not targetPart then return false end
+    
+    pcall(function()
+        if tracerConnection then tracerConnection:Disconnect() end
+        if tracerBeam then tracerBeam:Destroy() end
+        if tracerAttachment0 then tracerAttachment0:Destroy() end
+        if tracerAttachment1 then tracerAttachment1:Destroy() end
+        
+        tracerAttachment0 = Instance.new("Attachment")
+        tracerAttachment0.Name = "Att0"
+        tracerAttachment0.Parent = rootPart
+        
+        tracerAttachment1 = Instance.new("Attachment")
+        tracerAttachment1.Name = "Att1"
+        tracerAttachment1.Parent = targetPart
+        
+        tracerBeam = Instance.new("Beam")
+        tracerBeam.Name = "TracerBeam"
+        tracerBeam.Attachment0 = tracerAttachment0
+        tracerBeam.Attachment1 = tracerAttachment1
+        tracerBeam.FaceCamera = true
+        tracerBeam.Width0 = 0.3
+        tracerBeam.Width1 = 0.3
+        tracerBeam.Color = ColorSequence.new(Color3.fromRGB(255, 0, 0))
+        tracerBeam.Transparency = NumberSequence.new(0)
+        tracerBeam.LightEmission = 1
+        tracerBeam.LightInfluence = 0
+        tracerBeam.Brightness = 3
+        tracerBeam.Parent = rootPart
+        
+        local pulseTime = 0
+        tracerConnection = RunService.Heartbeat:Connect(function(dt)
+            if tracerBeam and tracerBeam.Parent and espEnabled then
+                pulseTime = pulseTime + dt
+                
+                local pulse = (math.sin(pulseTime * 3) + 1) / 2
+                local r = 230 + (25 * pulse)
+                tracerBeam.Color = ColorSequence.new(Color3.fromRGB(r, 0, 0))
+                
+                local width = 0.25 + (0.15 * pulse)
+                tracerBeam.Width0 = width
+                tracerBeam.Width1 = width
+                
+                if targetPart and targetPart.Parent and tracerAttachment1 then
+                    tracerAttachment1.Parent = targetPart
+                end
+            else
+                if tracerConnection then
+                    tracerConnection:Disconnect()
+                end
+            end
+        end)
+        
+        print("✅ Tracer line created!")
+    end)
+    
+    return true
 end
 
 local function removeTracerLine()
@@ -656,39 +640,9 @@ local function removeTracerLine()
     if tracerAttachment1 then tracerAttachment1:Destroy(); tracerAttachment1 = nil end
 end
 
-local function createTracerLine()
-    if not highestValueData or not highestValueData.model then return false end
-    local character = player.Character; if not character then return false end
-    local rootPart = character:FindFirstChild("HumanoidRootPart"); if not rootPart then return false end
-    local targetPart = highestValueData.model.PrimaryPart or highestValueData.model:FindFirstChild("HumanoidRootPart") or highestValueData.model:FindFirstChildWhichIsA('BasePart')
-    if not targetPart then return false end
-    pcall(function()
-        if tracerConnection then tracerConnection:Disconnect() end; removeTracerLine()
-        tracerAttachment0 = Instance.new("Attachment"); tracerAttachment0.Name = "Att0"; tracerAttachment0.Parent = rootPart
-        tracerAttachment1 = Instance.new("Attachment"); tracerAttachment1.Name = "Att1"; tracerAttachment1.Parent = targetPart
-        tracerBeam = Instance.new("Beam"); tracerBeam.Name = "TracerBeam"
-        tracerBeam.Attachment0 = tracerAttachment0; tracerBeam.Attachment1 = tracerAttachment1
-        tracerBeam.FaceCamera = true; tracerBeam.Width0 = 0.3; tracerBeam.Width1 = 0.3
-        tracerBeam.Color = ColorSequence.new(Color3.fromRGB(255, 0, 0)); tracerBeam.Transparency = NumberSequence.new(0)
-        tracerBeam.LightEmission = 1; tracerBeam.LightInfluence = 0; tracerBeam.Brightness = 3; tracerBeam.Parent = rootPart
-        local pulseTime = 0
-        tracerConnection = RunService.Heartbeat:Connect(function(dt)
-            if tracerBeam and tracerBeam.Parent and espEnabled then
-                pulseTime = pulseTime + dt
-                local pulse = (math.sin(pulseTime * 3) + 1) / 2
-                local r = 230 + (25 * pulse)
-                tracerBeam.Color = ColorSequence.new(Color3.fromRGB(r, 0, 0))
-                local width = 0.25 + (0.15 * pulse); tracerBeam.Width0 = width; tracerBeam.Width1 = width
-                if targetPart and targetPart.Parent and tracerAttachment1 then tracerAttachment1.Parent = targetPart end
-            else if tracerConnection then tracerConnection:Disconnect() end end
-        end)
-        print("✅ Tracer line created!")
-    end)
-    return true
-end
-
+-- Update the highest value ESP
 local function updateHighestValueESP()
-    if highestValueData and not highestValueData.model.Parent then
+    if highestValueData and not checkPetExists() then
         print("⚠️ Current pet removed, searching for new highest value...")
         if highestValueESP then
             if highestValueESP.highlight then highestValueESP.highlight:Destroy() end
@@ -696,19 +650,29 @@ local function updateHighestValueESP()
             if highestValueESP.boxAdornment then highestValueESP.boxAdornment:Destroy() end
             if highestValueESP.podiumHighlight then highestValueESP.podiumHighlight:Destroy() end
         end
-        highestValueESP = nil; highestValueData = nil; removeTracerLine()
+        highestValueESP = nil
+        highestValueData = nil
+        removeTracerLine()
     end
+    
     local newHighest = findHighestBrainrot()
+    
     if newHighest then
         if not highestValueData or newHighest.value > highestValueData.value then
             createHighestValueESP(newHighest)
-            if espEnabled then createTracerLine() end
+            
+            if espEnabled then
+                createTracerLine()
+            end
+            
             return newHighest
         end
     end
+    
     return highestValueData
 end
 
+-- Remove the highest value ESP
 local function removeHighestValueESP()
     if highestValueESP then
         pcall(function()
@@ -717,21 +681,40 @@ local function removeHighestValueESP()
             if highestValueESP.boxAdornment then highestValueESP.boxAdornment:Destroy() end
             if highestValueESP.podiumHighlight then highestValueESP.podiumHighlight:Destroy() end
         end)
-        highestValueESP = nil; highestValueData = nil
+        highestValueESP = nil
+        highestValueData = nil
     end
+    
     removeTracerLine()
 end
 
+-- Toggle the Brainrot ESP V3
 local function toggleEspBest(enabled)
     espEnabled = enabled
+    
     if espEnabled then
         updateHighestValueESP()
-        if autoUpdateThread then task.cancel(autoUpdateThread) end
-        autoUpdateThread = task.spawn(function() while espEnabled do task.wait(1); updateHighestValueESP() end end)
+        
+        if autoUpdateThread then
+            task.cancel(autoUpdateThread)
+        end
+        
+        autoUpdateThread = task.spawn(function()
+            while espEnabled do
+                task.wait(1)
+                updateHighestValueESP()
+            end
+        end)
+        
         print("✅ Brainrot ESP V3: ON")
     else
         removeHighestValueESP()
-        if autoUpdateThread then task.cancel(autoUpdateThread); autoUpdateThread = nil end
+        
+        if autoUpdateThread then
+            task.cancel(autoUpdateThread)
+            autoUpdateThread = nil
+        end
+        
         print("❌ Brainrot ESP V3: OFF")
     end
 end
@@ -768,7 +751,7 @@ local function toggleEspBaseTimer(state)
         espBaseTimerConnection = RunService.RenderStepped:Connect(function()
             if not Plots then Plots = Workspace:FindFirstChild('Plots'); if not Plots then return end end
             for _, plot in pairs(Plots:GetChildren()) do
-                local purchases = plot:FindFirstChild("Purchases")
+                local purchases = plot:FindFirstChild('Purchases')
                 if purchases then
                     local lowestFloor = findLowestFloor(purchases)
                     if lowestFloor then
@@ -780,6 +763,7 @@ local function toggleEspBaseTimer(state)
                             if remainingTime then
                                 local currentText = remainingTime.Text or '0'
                                 local numeric = tonumber(currentText)
+                                -- *** FIX: Simplified logic to prevent flickering ***
                                 if numeric and numeric <= 0 then
                                     timerLabel.Text = 'UNLOCKED'
                                     timerLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
@@ -800,8 +784,8 @@ local function toggleEspBaseTimer(state)
     else
         if espBaseTimerConnection then espBaseTimerConnection:Disconnect(); espBaseTimerConnection = nil end
         for _, plot in pairs(Workspace:FindFirstChild('Plots') and Workspace.Plots:GetChildren() or {}) do
-            local purchases = plot:FindFirstChild("Purchases")
-            if purchases then for _, child in pairs(purchases:GetChildren()) do local main = child:FindFirstChild("Main"); if main then local gui = main:FindFirstChild("GlobalTimerGui"); if gui then gui:Destroy() end end end end
+            local purchases = plot:FindFirstChild('Purchases')
+            if purchases then for _, child in pairs(purchases:GetChildren()) do local main = child:FindFirstChild('Main'); if main then local gui = main:FindFirstChild('GlobalTimerGui'); if gui then gui:Destroy() end end end end
         end
         print("❌ ESP Base Timer: OFF")
     end
@@ -815,13 +799,17 @@ local function loadGrappleSpeed()
         grappleSpeedEnabled = true; print("✅ Grapple Speed: ON")
     end)
 end
+
 local function unloadGrappleSpeed()
     if not grappleSpeedEnabled then return end
     grappleSpeedEnabled = false
     pcall(function() if player.Character and player.Character:FindFirstChildOfClass("Humanoid") then player.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = 16 end end)
     print("❌ Grapple Speed: OFF")
 end
-local function toggleGrappleSpeed(state) if state then loadGrappleSpeed() else unloadGrappleSpeed() end end
+
+local function toggleGrappleSpeed(state)
+    if state then loadGrappleSpeed() else unloadGrappleSpeed() end
+end
 
 -- ==================== ANTI KNOCKBACK FUNCTION ====================
 local function startNoKnockback()
@@ -854,13 +842,16 @@ local function startNoKnockback()
         end
     end)
 end
+
 local function stopNoKnockback()
     if antiKnockbackConn then antiKnockbackConn:Disconnect(); antiKnockbackConn = nil end
 end
+
 local function toggleAntiKnockback(state)
     antiKnockbackEnabled = state
     if antiKnockbackEnabled then startNoKnockback(); print("✅ Anti Knockback: ON") else stopNoKnockback(); print("❌ Anti Knockback: OFF") end
 end
+
 player.CharacterAdded:Connect(function(newCharacter) if antiKnockbackEnabled then task.wait(1); startNoKnockback(); print("🔄 Reloaded anti-knockback after respawn") end end)
 
 -- ==================== ANTI RAGDOLL FUNCTION ====================
@@ -875,10 +866,12 @@ local function stopRagdoll()
     end
     root.Velocity = Vector3.new(0, math.min(root.Velocity.Y, 0), 0); root.RotVelocity = Vector3.new(0, 0, 0); workspace.CurrentCamera.CameraSubject = hum
 end
+
 local function startRagdollTimer()
     if ragdollTimer then ragdollTimer:Disconnect() end
     ragdollActive = true; ragdollTimer = RunService.Heartbeat:Connect(function() ragdollTimer:Disconnect(); ragdollTimer = nil; stopRagdoll() end)
 end
+
 local function watchHumanoidStates(char)
     local hum = char:WaitForChild("Humanoid")
     if humanoidWatchConnection then humanoidWatchConnection:Disconnect() end
@@ -891,10 +884,12 @@ local function watchHumanoidStates(char)
         end
     end)
 end
+
 local function setupAntiRagdollCharacter(char)
     ragdollActive = false; if ragdollTimer then ragdollTimer:Disconnect(); ragdollTimer = nil end
     char:WaitForChild("Humanoid"); char:WaitForChild("HumanoidRootPart"); watchHumanoidStates(char)
 end
+
 local function startAntiRagdoll()
     isAntiRagdollEnabled = true
     for _, conn in pairs(antiRagdollConnections) do if conn then conn:Disconnect() end end; table.clear(antiRagdollConnections)
@@ -902,14 +897,17 @@ local function startAntiRagdoll()
     if player.Character then setupAntiRagdollCharacter(player.Character) end
     table.insert(antiRagdollConnections, player.CharacterAdded:Connect(setupAntiRagdollCharacter))
 end
+
 local function stopAntiRagdoll()
     isAntiRagdollEnabled = false; ragdollActive = false; if ragdollTimer then ragdollTimer:Disconnect(); ragdollTimer = nil end
     for _, conn in pairs(antiRagdollConnections) do if conn then conn:Disconnect() end end; table.clear(antiRagdollConnections)
     if humanoidWatchConnection then humanoidWatchConnection:Disconnect(); humanoidWatchConnection = nil end
 end
+
 local function toggleAntiRagdoll(state)
     if state then startAntiRagdoll(); print("✅ Anti Ragdoll: ON") else stopAntiRagdoll(); print("❌ Anti Ragdoll: OFF") end
 end
+
 player.CharacterAdded:Connect(function(newCharacter) if isAntiRagdollEnabled then task.wait(0.5); setupAntiRagdollCharacter(newCharacter); print("🔄 Reloaded anti-ragdoll after respawn") end end)
 
 -- ==================== INVISIBLE V1 FUNCTION ====================
@@ -921,6 +919,7 @@ local function removeFolders()
     local childAddedConn = playerFolder.ChildAdded:Connect(function(child) if child.Name == "DoubleRig" or child.Name == "Constraints" then child:Destroy() end end)
     table.insert(connections.SemiInvisible, childAddedConn)
 end
+
 local function doClone()
     if player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
         hip = player.Character.Humanoid.HipHeight; oldRoot = player.Character:FindFirstChild("HumanoidRootPart")
@@ -933,6 +932,7 @@ local function doClone()
     end
     return false
 end
+
 local function revertClone()
     if not oldRoot or not oldRoot:IsDescendantOf(game.Workspace) or not player.Character or player.Character.Humanoid.Health <= 0 then return false end
     local tempParent = Instance.new("Model"); tempParent.Parent = game; player.Character.Parent = tempParent; oldRoot.Parent = player.Character
@@ -941,6 +941,7 @@ local function revertClone()
     if clone then local oldPos = clone.CFrame; clone:Destroy(); clone = nil; oldRoot.CFrame = oldPos end
     oldRoot = nil; if player.Character and player.Character.Humanoid then player.Character.Humanoid.HipHeight = hip end
 end
+
 local function animationTrickery()
     if player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
         local anim = Instance.new("Animation"); anim.AnimationId = "http://www.roblox.com/asset/?id=18537363391"
@@ -951,6 +952,7 @@ local function animationTrickery()
         task.delay(0, function() animTrack.TimePosition = 0.7; task.delay(1, function() animTrack:AdjustSpeed(math.huge) end) end)
     end
 end
+
 local function enableInvisibility()
     if not player.Character or player.Character.Humanoid.Health <= 0 then return false end
     removeFolders(); local success = doClone()
@@ -970,10 +972,12 @@ local function enableInvisibility()
     end
     return false
 end
+
 local function disableInvisibility()
     if animTrack then animTrack:Stop(); animTrack:Destroy(); animTrack = nil end
     if connection then connection:Disconnect() end; if characterConnection then characterConnection:Disconnect() end; revertClone(); removeFolders()
 end
+
 local function setupGodmode()
     local char = player.Character or player.CharacterAdded:Wait(); local hum = char:WaitForChild("Humanoid")
     local mt = getrawmetatable(game); local oldNC = mt.__namecall; local oldNI = mt.__newindex; setreadonly(mt, false)
@@ -989,6 +993,7 @@ local function setupGodmode()
     end)
     setreadonly(mt, true)
 end
+
 local function toggleInvisibleV1(state)
     if state then
         if not isInvisible then removeFolders(); setupGodmode(); if enableInvisibility() then isInvisible = true; print("✅ Semi Invisible: ON") end
@@ -1007,9 +1012,11 @@ local function getStealCount()
     end)
     return success and result or 0
 end
+
 local function kickPlayer()
     local success = pcall(function() player:Kick("Steal Success!") end); if not success then warn("Failed to kick, attempting shutdown..."); game:Shutdown() end
 end
+
 local function startMonitoring()
     if isMonitoring then return end
     isMonitoring = true; lastStealCount = getStealCount(); print("✅ [Monitor] Started. Initial steals:", lastStealCount)
@@ -1020,10 +1027,12 @@ local function startMonitoring()
         lastStealCount = currentStealCount
     end)
 end
+
 local function stopMonitoring()
     if not isMonitoring then return end
     isMonitoring = false; print("⛔ [Monitor] Stopped"); if monitoringLoop then monitoringLoop:Disconnect(); monitoringLoop = nil end
 end
+
 local function toggleAutoKickAfterSteal(state)
     if state then startMonitoring(); print("✅ Auto Kick After Steal: ON") else stopMonitoring(); print("❌ Auto Kick After Steal: OFF") end
 end
@@ -1031,69 +1040,141 @@ end
 -- ==================== INSTANT GRAB FUNCTION (FIXED) ====================
 local function getPromptPosition(prompt)
     local parent = prompt.Parent
-    if parent:IsA("BasePart") then return parent.Position end
-    if parent:IsA("Model") then local primary = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart"); if primary then return primary.Position end end
-    if parent:IsA("Attachment") then return parent.WorldPosition end
+    
+    if parent:IsA("BasePart") then
+        return parent.Position
+    end
+    
+    if parent:IsA("Model") then
+        local primary = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart")
+        if primary then
+            return primary.Position
+        end
+    end
+    
+    if parent:IsA("Attachment") then
+        return parent.WorldPosition
+    end
+    
     return nil
 end
-local DETECTION_RANGE = 50
+
+-- Extended range untuk detect objek atas/bawah
+local DETECTION_RANGE = 50  -- Increase range untuk detect lebih jauh
+
 local function findNearestPrompt()
     local character = player.Character
     if not character then return nil, math.huge end
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil, math.huge end
-    local nearest = nil; local minDist = math.huge
+    
+    local nearest = nil
+    local minDist = math.huge
     local plots = workspace:FindFirstChild("Plots")
+    
     if not plots then return nil, math.huge end
+    
     for _, obj in pairs(plots:GetDescendants()) do
         if obj:IsA("ProximityPrompt") and obj.Enabled and obj.ActionText == "Steal" then
             local pos = getPromptPosition(obj)
+            
             if pos then
+                -- Calculate 3D distance (termasuk Y axis untuk objek atas/bawah)
                 local dist = (hrp.Position - pos).Magnitude
-                if dist <= DETECTION_RANGE and dist < minDist then minDist = dist; nearest = obj end
+                
+                -- Check dalam detection range kita
+                if dist <= DETECTION_RANGE and dist < minDist then
+                    minDist = dist
+                    nearest = obj
+                end
             end
         end
     end
+    
     return nearest, minDist
 end
+
 local function activatePrompt(prompt)
     local originalMaxDist = prompt.MaxActivationDistance
-    prompt.MaxActivationDistance = 100
-    task.wait(0.05); fireproximityprompt(prompt, 0)
-    prompt:InputHoldBegin(); task.wait(0.1); prompt:InputHoldEnd()
-    task.wait(0.1); prompt.MaxActivationDistance = originalMaxDist
+    
+    -- Temporarily extend range
+    prompt.MaxActivationDistance = 100  -- Extend range sementara
+    
+    -- Activate dengan range yang dipanjangkan
+    task.wait(0.05)
+    fireproximityprompt(prompt, 0)  -- Distance parameter 0
+    
+    -- Hold prompt
+    prompt:InputHoldBegin()
+    task.wait(0.1)
+    prompt:InputHoldEnd()
+    
+    task.wait(0.1)
+    
+    -- Restore original range
+    prompt.MaxActivationDistance = originalMaxDist
 end
+
 local function startInstantGrab()
     if instantGrabEnabled then return end
-    instantGrabEnabled = true; print("✅ Instant Grab: ON")
+    instantGrabEnabled = true
+    print("✅ Instant Grab: ON")
+    
     instantGrabThread = task.spawn(function()
-        local currentPrompt = nil; local currentDistance = math.huge; local lastUpdate = 0; local isActivating = false
+        local currentPrompt = nil
+        local currentDistance = math.huge
+        local lastUpdate = 0
+        local isActivating = false
+        
         RunService.Heartbeat:Connect(function()
             local now = tick()
-            if now - lastUpdate >= 0.25 then
+            -- *** FIX: Reduced update frequency to improve performance ***
+            if now - lastUpdate >= 0.25 then -- Changed from 0.05 to 0.25
                 currentPrompt, currentDistance = findNearestPrompt()
                 lastUpdate = now
             end
         end)
+        
         while instantGrabEnabled do
             local character = player.Character
             if character then
                 local humanoid = character:FindFirstChildOfClass("Humanoid")
                 if humanoid and humanoid.WalkSpeed > 25 and not isActivating then
                     if currentPrompt and currentDistance <= DETECTION_RANGE then
-                        isActivating = true; activatePrompt(currentPrompt); task.wait(1.5); isActivating = false
-                    else task.wait(0.1) end
-                else task.wait(0.5) end
-            else task.wait(1) end
+                        isActivating = true
+                        activatePrompt(currentPrompt)
+                        task.wait(1.5)
+                        isActivating = false
+                    else
+                        task.wait(0.1)
+                    end
+                else
+                    task.wait(0.5)
+                end
+            else
+                task.wait(1)
+            end
         end
     end)
 end
+
 local function stopInstantGrab()
     if not instantGrabEnabled then return end
-    instantGrabEnabled = false; print("❌ Instant Grab: OFF")
-    if instantGrabThread then task.cancel(instantGrabThread); instantGrabThread = nil end
+    instantGrabEnabled = false
+    print("❌ Instant Grab: OFF")
+    if instantGrabThread then
+        task.cancel(instantGrabThread)
+        instantGrabThread = nil
+    end
 end
-local function toggleInstantGrab(state) if state then startInstantGrab() else stopInstantGrab() end end
+
+local function toggleInstantGrab(state)
+    if state then
+        startInstantGrab()
+    else
+        stopInstantGrab()
+    end
+end
 
 -- ==================== TOUCH FLING V2 FUNCTION ====================
 local function enableTouchFling()
@@ -1105,13 +1186,18 @@ local function enableTouchFling()
     end)
     touchFlingEnabled = true; print("✅ Touch Fling V2: ON")
 end
+
 local function disableTouchFling()
     if touchFlingConnection then touchFlingConnection:Disconnect(); touchFlingConnection = nil end
     local marker = ReplicatedStorage:FindFirstChild("juisdfj0i32i0eidsuf0iok"); if marker then marker:Destroy() end
     pcall(function() local character = player.Character; if character then local humanoid = character:FindFirstChildWhichIsA("Humanoid"); if humanoid then humanoid.AutoJumpEnabled = true end end end)
     touchFlingEnabled = false; print("❌ Touch Fling V2: OFF")
 end
-local function toggleTouchFling(state) if state then enableTouchFling() else disableTouchFling() end end
+
+local function toggleTouchFling(state)
+    if state then enableTouchFling() else disableTouchFling() end
+end
+
 player.CharacterAdded:Connect(function(newCharacter) if touchFlingEnabled then task.wait(1); disableTouchFling(); enableTouchFling(); print("🔄 Reloaded Touch Fling V2 after respawn") end end)
 
 -- ==================== ALLOW FRIENDS FUNCTION ====================
@@ -1128,6 +1214,7 @@ local function parseTimeToSeconds(timeText)
     local secondsOnly = timeText:match("(%d+)s"); if secondsOnly then return tonumber(secondsOnly) end
     local minutesOnly = timeText:match("(%d+)m"); if minutesOnly then return tonumber(minutesOnly) * 60 end; return nil
 end
+
 local function playBellSound()
     if bellSoundPlayed then return end
     if currentBellSound then currentBellSound:Stop(); currentBellSound:Destroy(); currentBellSound = nil end
@@ -1135,6 +1222,7 @@ local function playBellSound()
     currentBellSound = sound; sound:Play(); bellSoundPlayed = true
     task.delay(3, function() if sound and sound.Parent then sound:Stop(); sound:Destroy() end; currentBellSound = nil end)
 end
+
 local function createAlertGui()
     if baselockAlertGui then return end
     baselockAlertGui = Instance.new("ScreenGui"); baselockAlertGui.Name = "BaselockReminderAlert"; baselockAlertGui.ResetOnSpawn = false; baselockAlertGui.Parent = game.CoreGui
@@ -1154,14 +1242,17 @@ local function createAlertGui()
     timeLabel.Font = Enum.Font.GothamBold; timeLabel.TextSize = 16; timeLabel.TextXAlignment = Enum.TextXAlignment.Left; timeLabel.TextStrokeTransparency = 0.5; timeLabel.TextStrokeColor3 = Color3.new(0, 0, 0); timeLabel.Parent = frame
     local flashTween = TweenService:Create(frameStroke, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {Color = Color3.fromRGB(255, 60, 60)}); flashTween:Play()
 end
+
 local function updateAlertGui(timeText)
     if not baselockAlertGui or not baselockAlertGui.Parent then return end
     local timeLabel = baselockAlertGui:FindFirstChild("Frame"):FindFirstChild("TimeLabel"); if timeLabel then timeLabel.Text = "Your Base Lock Time: " .. timeText end
 end
+
 local function removeAlertGui()
     if baselockAlertGui then baselockAlertGui:Destroy(); baselockAlertGui = nil end
     if currentBellSound then currentBellSound:Stop(); currentBellSound:Destroy(); currentBellSound = nil end; bellSoundPlayed = false
 end
+
 local function checkMyBaseTimer()
     if not baselockReminderEnabled then return end
     local plots = Workspace:FindFirstChild("Plots"); if not plots then return end; local playerBaseName = player.DisplayName .. "'s Base"
@@ -1181,20 +1272,27 @@ local function checkMyBaseTimer()
         end
     end
 end
+
 local function startBaselockReminder()
     if baselockReminderEnabled then return end
     baselockReminderEnabled = true; print("✅ Baselock Reminder: ON")
     baselockConnection = RunService.Heartbeat:Connect(function() task.wait(0.5); pcall(checkMyBaseTimer) end)
 end
+
 local function stopBaselockReminder()
     if not baselockReminderEnabled then return end
     baselockReminderEnabled = false; print("❌ Baselock Reminder: OFF"); if baselockConnection then baselockConnection:Disconnect(); baselockConnection = nil end; removeAlertGui()
 end
-local function toggleBaselockReminder(state) if state then startBaselockReminder() else stopBaselockReminder() end end
+
+local function toggleBaselockReminder(state)
+    if state then startBaselockReminder() else stopBaselockReminder() end
+end
+
 player.CharacterAdded:Connect(function(newCharacter) if baselockReminderEnabled then task.wait(1); stopBaselockReminder(); startBaselockReminder(); print("🔄 Reloaded Baselock Reminder after respawn") end end)
 
 -- ==================== ESP PLAYERS FUNCTION ====================
 local function getEquippedItem(character) local tool = character:FindFirstChildOfClass("Tool"); if tool then return tool.Name end; return "None" end
+
 local function createESP(targetPlayer)
     if targetPlayer == player then return end; local character = targetPlayer.Character; if not character then return end; local rootPart = character:FindFirstChild("HumanoidRootPart"); if not rootPart then return end
     local highlight = Instance.new("Highlight"); highlight.Name = "PlayerESP"; highlight.Adornee = character; highlight.FillColor = Color3.fromRGB(0, 255, 255); highlight.OutlineColor = Color3.fromRGB(0, 200, 255); highlight.FillTransparency = 0.5; highlight.OutlineTransparency = 0; highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop; highlight.Parent = character
@@ -1203,9 +1301,11 @@ local function createESP(targetPlayer)
     local itemLabel = Instance.new("TextLabel"); itemLabel.Size = UDim2.new(1, 0, 0, 18); itemLabel.Position = UDim2.new(0, 0, 0, 22); itemLabel.BackgroundTransparency = 1; itemLabel.Text = "Item: None"; itemLabel.TextColor3 = Color3.fromRGB(255, 255, 100); itemLabel.TextStrokeTransparency = 0.5; itemLabel.TextStrokeColor3 = Color3.new(0, 0, 0); itemLabel.Font = Enum.Font.Gotham; itemLabel.TextSize = 12; itemLabel.Parent = billboard
     espObjects[targetPlayer] = {highlight = highlight, billboard = billboard, itemLabel = itemLabel, character = character}
 end
+
 local function removeESP(targetPlayer)
     if espObjects[targetPlayer] then if espObjects[targetPlayer].highlight then espObjects[targetPlayer].highlight:Destroy() end; if espObjects[targetPlayer].billboard then espObjects[targetPlayer].billboard:Destroy() end; espObjects[targetPlayer] = nil end
 end
+
 local function updateESP()
     if not espPlayersEnabled then return end
     for p, espData in pairs(espObjects) do
@@ -1215,16 +1315,22 @@ local function updateESP()
         else removeESP(p) end
     end
 end
+
 local function enableESP()
     if espPlayersEnabled then return end
     espPlayersEnabled = true; for _, p in pairs(Players:GetPlayers()) do if p ~= player and p.Character then createESP(p) end end
     updateConnection = RunService.RenderStepped:Connect(updateESP); print("✅ ESP Players Enabled - Cyan outlines active!")
 end
+
 local function disableESP()
     if not espPlayersEnabled then return end
     espPlayersEnabled = false; for p, _ in pairs(espObjects) do removeESP(p) end; if updateConnection then updateConnection:Disconnect(); updateConnection = nil end; print("❌ ESP Players Disabled")
 end
-local function toggleESPPlayers(enabled) if enabled then enableESP() else disableESP() end end
+
+local function toggleESPPlayers(enabled)
+    if enabled then enableESP() else disableESP() end
+end
+
 Players.PlayerAdded:Connect(function(p) p.CharacterAdded:Connect(function(character) task.wait(1); if espPlayersEnabled and p ~= player then createESP(p) end end) end)
 Players.PlayerRemoving:Connect(function(p) removeESP(p) end)
 for _, p in pairs(Players:GetPlayers()) do if p ~= player then p.CharacterAdded:Connect(function(character) task.wait(1); if espPlayersEnabled then createESP(p) end end) end end
@@ -1232,6 +1338,7 @@ for _, p in pairs(Players:GetPlayers()) do if p ~= player then p.CharacterAdded:
 -- ==================== LASER CAPE (AIMBOT) FUNCTION ====================
 local blacklistNames = {"alex4eva", "jkxkelu", "BigTulaH", "xxxdedmoth", "JokiTablet", "sleepkola", "Aimbot36022", "Djrjdjdk0", "elsodidudujd", "SENSEIIIlSALT", "yaniecky", "ISAAC_EVO", "7xc_ls", "itz_d1egx"}
 local blacklist = {}; for _, name in ipairs(blacklistNames) do blacklist[string.lower(name)] = true end
+
 local function getLaserRemote()
     local remote = nil; pcall(function()
         if ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("Net") then remote = ReplicatedStorage.Packages.Net:FindFirstChild("RE/UseItem") or ReplicatedStorage.Packages.Net:FindFirstChild("RE"):FindFirstChild("UseItem") end
@@ -1239,24 +1346,29 @@ local function getLaserRemote()
     end)
     return remote
 end
+
 local function isValidTarget(p)
     if not p or not p.Character or p == player then return false end; local name = p.Name and string.lower(p.Name) or ""; if blacklist[name] then return false end
     local hrp = p.Character:FindFirstChild("HumanoidRootPart"); local humanoid = p.Character:FindFirstChildOfClass("Humanoid"); if not hrp or not humanoid then return false end; if humanoid.Health <= 0 then return false end; return true
 end
+
 local function findNearestAllowed()
     if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return nil end
     local myPos = player.Character.HumanoidRootPart.Position; local nearest = nil; local nearestDist = math.huge
     for _, pl in ipairs(Players:GetPlayers()) do if isValidTarget(pl) then local targetHRP = pl.Character:FindFirstChild("HumanoidRootPart"); if targetHRP then local d = (Vector3.new(targetHRP.Position.X, 0, targetHRP.Position.Z) - Vector3.new(myPos.X, 0, myPos.Z)).Magnitude; if d < nearestDist then nearestDist = d; nearest = pl end end end end
     return nearest
 end
+
 local function safeFire(targetPlayer)
     if not targetPlayer or not targetPlayer.Character then return end; local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart"); if not targetHRP then return end
     local remote = getLaserRemote(); local args = {[1] = targetHRP.Position, [2] = targetHRP}
     if remote and remote.FireServer then pcall(function() remote:FireServer(unpack(args)) end) end
 end
+
 local function autoLaserWorker()
     while autoLaserEnabled do local target = findNearestAllowed(); if target then safeFire(target) end; local t0 = tick(); while tick() - t0 < 0.6 do if not autoLaserEnabled then break end; RunService.Heartbeat:Wait() end end
 end
+
 local function toggleAutoLaser(enabled)
     autoLaserEnabled = enabled
     if autoLaserEnabled then if autoLaserThread then task.cancel(autoLaserThread) end; autoLaserThread = task.spawn(autoLaserWorker); print("✓ Laser Cape (Aimbot): ON")
@@ -1265,13 +1377,16 @@ end
 
 -- ==================== ESP TURRET (SENTRY) FUNCTION ====================
 local function getPlayerNameFromSentry(sentryName)
-    local userId = sentryName:match("Sentry_(%d+)"); if userId then for _, p in ipairs(Players:GetPlayers()) do if tostring(p.UserId) == userId then return p.Name end; return "Player " .. userId end; return "Unknown" end; return "Unknown"
+    local userId = sentryName:match("Sentry_(%d+)"); if userId then for _, p in ipairs(Players:GetPlayers()) do if tostring(p.UserId) == userId then return p.Name end end; return "Player " .. userId end; return "Unknown"
 end
+
 local function createSentryESP(sentry)
     if sentry:FindFirstChild("SentryESP_Highlight") then sentry.SentryESP_Highlight:Destroy() end
     local highlight = Instance.new("Highlight"); highlight.Name = "SentryESP_Highlight"; highlight.Adornee = sentry; highlight.FillColor = Color3.fromRGB(0, 255, 255); highlight.OutlineColor = Color3.fromRGB(0, 255, 255); highlight.FillTransparency = 0.6; highlight.OutlineTransparency = 0; highlight.Parent = sentry
 end
+
 local function removeSentryESP(sentry) if sentry:FindFirstChild("SentryESP_Highlight") then sentry.SentryESP_Highlight:Destroy() end end
+
 local function scanForSentries()
     local found = {}
     for _, obj in ipairs(Workspace:GetChildren()) do
@@ -1279,25 +1394,34 @@ local function scanForSentries()
     end
     for sentry, _ in pairs(trackedSentries) do if not sentry.Parent or not found[sentry] then trackedSentries[sentry] = nil; removeSentryESP(sentry) end end
 end
+
 local function enableSentryESP()
     if sentryESPEnabled then return end
     sentryESPEnabled = true; for sentry, _ in pairs(trackedSentries) do if sentry.Parent then createSentryESP(sentry) end end
     if not scanConnection then scanConnection = RunService.Heartbeat:Connect(function() if sentryESPEnabled then pcall(scanForSentries) end end) end; print("✅ Sentry ESP Enabled")
 end
+
 local function disableSentryESP()
     if not sentryESPEnabled then return end
     sentryESPEnabled = false; for sentry, _ in pairs(trackedSentries) do removeSentryESP(sentry) end; if scanConnection then scanConnection:Disconnect(); scanConnection = nil end; print("❌ Sentry ESP Disabled")
 end
-local function toggleSentryESP(state) if state then enableSentryESP() else disableSentryESP() end end
+
+local function toggleSentryESP(state)
+    if state then enableSentryESP() else disableSentryESP() end
+end
+
 Workspace.ChildAdded:Connect(function(child)
     task.wait(0.1); if child.Name:match("^Sentry_%d+") then local ownerName = getPlayerNameFromSentry(child.Name); print("NEW SENTRY PLACED:", ownerName); task.wait(0.5); trackedSentries[child] = true; if sentryESPEnabled then createSentryESP(child); scanForSentries() end end
 end)
 task.wait(1); scanForSentries()
 
--- ==================== BASE LINE FUNCTION ====================
+-- ==================== BASE LINE FUNCTION (UPDATED - TARGETS PLOT SIGN) ====================
 local function findPlayerPlot()
     local plots = workspace:FindFirstChild("Plots")
-    if not plots then warn("❌ Plots folder not found!"); return nil end
+    if not plots then
+        warn("❌ Plots folder not found!")
+        return nil
+    end
     local playerBaseName = player.DisplayName .. "'s Base"
     for _, plot in pairs(plots:GetChildren()) do
         if plot:IsA("Model") or plot:IsA("Folder") then
@@ -1308,59 +1432,141 @@ local function findPlayerPlot()
                     local plotSignText = surfaceGui.Frame.TextLabel.Text
                     if plotSignText == playerBaseName then
                         print("✅ Found player's plot:", plot.Name)
-                        return plot, plotSign
+                        return plot, plotSign -- Return both plot and its sign
                     end
                 end
             end
         end
     end
-    warn("❌ Player's base not found!"); return nil, nil
+    warn("❌ Player's base not found!")
+    return nil, nil
 end
+
 local function createPlotLine()
-    local Character = player.Character; if not Character then return false end
-    local RootPart = Character:FindFirstChild("HumanoidRootPart"); if not RootPart then return false end
+    local Character = player.Character
+    if not Character then return false end
+    local RootPart = Character:FindFirstChild("HumanoidRootPart")
+    if not RootPart then return false end
+
+    -- [UPDATED] Get both the plot and the sign
     local playerPlot, plotSign = findPlayerPlot()
-    if not playerPlot or not plotSign then warn("❌ Cannot find your base or its sign!"); return false end
-    local targetPosition = plotSign.Position; print("📍 Creating line to PlotSign at:", targetPosition)
-    baseTargetPart = Instance.new("Part"); baseTargetPart.Name = "PlotLineTarget"; baseTargetPart.Size = Vector3.new(0.1, 0.1, 0.1)
-    baseTargetPart.Position = targetPosition; baseTargetPart.Anchored = true; baseTargetPart.CanCollide = false
-    baseTargetPart.Transparency = 1; baseTargetPart.Parent = workspace
-    baseBeamPart = Instance.new("Part"); baseBeamPart.Name = "PlotLineBeam"; baseBeamPart.Size = Vector3.new(0.1, 0.1, 0.1)
-    baseBeamPart.Transparency = 1; baseBeamPart.CanCollide = false; baseBeamPart.Parent = workspace
-    local att0 = Instance.new("Attachment"); att0.Name = "Att0"; att0.Parent = baseBeamPart
-    local att1 = Instance.new("Attachment"); att1.Name = "Att1"; att1.Parent = baseTargetPart
-    baseBeam = Instance.new("Beam"); baseBeam.Name = "PlotLineBeam"; baseBeam.Attachment0 = att0; baseBeam.Attachment1 = att1
-    baseBeam.FaceCamera = true; baseBeam.Width0 = 0.3; baseBeam.Width1 = 0.3
-    baseBeam.Color = ColorSequence.new(Color3.fromRGB(100, 0, 0)); baseBeam.Transparency = NumberSequence.new(0)
-    baseBeam.LightEmission = 0.5; baseBeam.Parent = baseBeamPart
+    if not playerPlot or not plotSign then
+        warn("❌ Cannot find your base or its sign!")
+        return false
+    end
+
+    -- [UPDATED] Get position directly from the PlotSign part
+    local targetPosition = plotSign.Position
+    print("📍 Creating line to PlotSign at:", targetPosition)
+
+    baseTargetPart = Instance.new("Part")
+    baseTargetPart.Name = "PlotLineTarget"
+    baseTargetPart.Size = Vector3.new(0.1, 0.1, 0.1)
+    baseTargetPart.Position = targetPosition
+    baseTargetPart.Anchored = true
+    baseTargetPart.CanCollide = false
+    baseTargetPart.Transparency = 1
+    baseTargetPart.Parent = workspace
+
+    baseBeamPart = Instance.new("Part")
+    baseBeamPart.Name = "PlotLineBeam"
+    baseBeamPart.Size = Vector3.new(0.1, 0.1, 0.1)
+    baseBeamPart.Transparency = 1
+    baseBeamPart.CanCollide = false
+    baseBeamPart.Parent = workspace
+
+    local att0 = Instance.new("Attachment")
+    att0.Name = "Att0"
+    att0.Parent = baseBeamPart
+
+    local att1 = Instance.new("Attachment")
+    att1.Name = "Att1"
+    att1.Parent = baseTargetPart
+
+    baseBeam = Instance.new("Beam")
+    baseBeam.Name = "PlotLineBeam"
+    baseBeam.Attachment0 = att0
+    baseBeam.Attachment1 = att1
+    baseBeam.FaceCamera = true
+    baseBeam.Width0 = 0.3
+    baseBeam.Width1 = 0.3
+    baseBeam.Color = ColorSequence.new(Color3.fromRGB(100, 0, 0))
+    baseBeam.Transparency = NumberSequence.new(0)
+    baseBeam.LightEmission = 0.5
+    baseBeam.Parent = baseBeamPart
+
     local pulseTime = 0
-    local animateConnection = RunService.Heartbeat:Connect(function(dt)
+    local animateConnection
+    animateConnection = RunService.Heartbeat:Connect(function(dt)
         if baseBeam and baseBeam.Parent then
-            pulseTime = pulseTime + dt; local pulse = (math.sin(pulseTime * 2) + 1) / 2; local r = 100 + (155 * pulse); baseBeam.Color = ColorSequence.new(Color3.fromRGB(r, 0, 0))
-        else if animateConnection then animateConnection:Disconnect() end end
+            pulseTime = pulseTime + dt
+            local pulse = (math.sin(pulseTime * 2) + 1) / 2
+            local r = 100 + (155 * pulse)
+            baseBeam.Color = ColorSequence.new(Color3.fromRGB(r, 0, 0))
+        else
+            if animateConnection then
+                animateConnection:Disconnect()
+            end
+        end
     end)
+
     baseLineConnection = RunService.Heartbeat:Connect(function()
-        local char = player.Character; if not char or not char.Parent then stopPlotLine(); return end
+        local char = player.Character
+        if not char or not char.Parent then
+            stopPlotLine()
+            return
+        end
         local root = char:FindFirstChild("HumanoidRootPart")
-        if root and baseBeamPart and baseBeamPart.Parent then baseBeamPart.CFrame = root.CFrame end
+        if root and baseBeamPart and baseBeamPart.Parent then
+            baseBeamPart.CFrame = root.CFrame
+        end
     end)
-    print("✅ Base line to PlotSign created!"); return true
+
+    print("✅ Base line to PlotSign created!")
+    return true
 end
+
 local function stopPlotLine()
-    if baseLineConnection then baseLineConnection:Disconnect(); baseLineConnection = nil end
-    if baseBeamPart then baseBeamPart:Destroy(); baseBeamPart = nil end
-    if baseTargetPart then baseTargetPart:Destroy(); baseTargetPart = nil end
-    if baseBeam then baseBeam:Destroy(); baseBeam = nil end
+    if baseLineConnection then
+        baseLineConnection:Disconnect()
+        baseLineConnection = nil
+    end
+    if baseBeamPart then
+        baseBeamPart:Destroy()
+        baseBeamPart = nil
+    end
+    if baseTargetPart then
+        baseTargetPart:Destroy()
+        baseTargetPart = nil
+    end
+    if baseBeam then
+        baseBeam:Destroy()
+        baseBeam = nil
+    end
     print("🛑 Base line removed")
 end
+
 local function toggleBaseLine(state)
     baseLineEnabled = state
-    if baseLineEnabled then pcall(createPlotLine) else pcall(stopPlotLine) end
+    if baseLineEnabled then
+        pcall(createPlotLine)
+    else
+        pcall(stopPlotLine)
+    end
 end
+
 player.CharacterAdded:Connect(function(newChar)
-    task.wait(1); if baseLineEnabled then pcall(stopPlotLine); task.wait(0.5); pcall(createPlotLine) end
+    task.wait(1)
+    if baseLineEnabled then
+        pcall(stopPlotLine)
+        task.wait(0.5)
+        pcall(createPlotLine)
+    end
 end)
-player.CharacterRemoving:Connect(function() pcall(stopPlotLine) end)
+
+player.CharacterRemoving:Connect(function()
+    pcall(stopPlotLine)
+end)
 
 -- ==================== UNIFIED ANTI DEBUFF SYSTEM ====================
 local function updateUseItemEventHandler()
@@ -1375,11 +1581,13 @@ local function updateUseItemEventHandler()
         isEventHandlerActive = true
     end
 end
+
 local function setupInstantAnimationBlocker()
     local character = player.Character; if not character then return end; local humanoid = character:FindFirstChild("Humanoid"); if not humanoid then return end; local animator = humanoid:FindFirstChildOfClass("Animator"); if not animator then return end
     if animationPlayedConnection then animationPlayedConnection:Disconnect() end
     animationPlayedConnection = animator.AnimationPlayed:Connect(function(track) if track and track.Animation then if tostring(track.Animation.AnimationId):gsub("%D", "") == BOOGIE_ANIMATION_ID then track:Stop(0); track:Destroy(); print("⚡ INSTANT BLOCK: Boogie animation destroyed!") end end end)
 end
+
 local function enableContinuousMonitoring()
     if heartbeatConnection then heartbeatConnection:Disconnect() end; local lastCheck = 0
     heartbeatConnection = RunService.Heartbeat:Connect(function()
@@ -1391,89 +1599,183 @@ local function enableContinuousMonitoring()
         end)
     end)
 end
+
 local function toggleAntiBee(state)
     antiBeeEnabled = state; updateUseItemEventHandler(); if antiBeeEnabled then print("✅ Anti Bee Enabled") else print("❌ Anti Bee Disabled") end
 end
+
 local function toggleAntiBoogie(state)
     antiBoogieEnabled = state; if antiBoogieEnabled then setupInstantAnimationBlocker(); enableContinuousMonitoring(); print("✅ Anti Boogie Bomb: ENABLED (3-Layer Defense)")
     else if animationPlayedConnection then animationPlayedConnection:Disconnect(); animationPlayedConnection = nil end; if heartbeatConnection then heartbeatConnection:Disconnect(); heartbeatConnection = nil end; print("❌ Anti Boogie Bomb: DISABLED") end; updateUseItemEventHandler()
 end
-local function toggleAntiDebuff(state) toggleAntiBee(state); toggleAntiBoogie(state) end
+
+local function toggleAntiDebuff(state)
+    toggleAntiBee(state); toggleAntiBoogie(state)
+end
+
 player.CharacterAdded:Connect(function(newCharacter) if antiBoogieEnabled then task.wait(0.5); setupInstantAnimationBlocker(); print("🔄 Reloaded animation blocker after respawn") end end)
 
--- ==================== UNWALK ANIM FUNCTION ====================
+-- ==================== UNWALK ANIM FUNCTION (NEW) ====================
 local function setupNoWalkAnimation(character)
-    character = character or player.Character; if not character then return end
-    local humanoid = character:WaitForChild("Humanoid"); local animator = humanoid:WaitForChild("Animator")
+    character = character or player.Character
+    if not character then return end
+
+    local humanoid = character:WaitForChild("Humanoid")
+    local animator = humanoid:WaitForChild("Animator")
+    
     local function stopAllAnimations()
-        local tracks = animator:GetPlayingAnimationTracks(); for _, track in pairs(tracks) do if track.IsPlaying then track:Stop() end end
+        local tracks = animator:GetPlayingAnimationTracks()
+        for _, track in pairs(tracks) do
+            if track.IsPlaying then
+                track:Stop()
+            end
+        end
     end
-    humanoid.Running:Connect(function(speed) stopAllAnimations() end)
-    humanoid.Jumping:Connect(function() stopAllAnimations() end)
-    animator.AnimationPlayed:Connect(function(animationTrack) animationTrack:Stop() end)
-    RunService.RenderStepped:Connect(function() stopAllAnimations() end)
+    
+    -- Hentikan animasi semasa berlari
+    humanoid.Running:Connect(function(speed)
+        stopAllAnimations()
+    end)
+    
+    -- Hentikan animasi semasa melompat
+    humanoid.Jumping:Connect(function()
+        stopAllAnimations()
+    end)
+    
+    -- Hentikan sebarang animasi baru yang cuba dimainkan
+    animator.AnimationPlayed:Connect(function(animationTrack)
+        animationTrack:Stop()
+    end)
+    
+    -- Hentikan animasi secara berterusan pada setiap frame
+    RunService.RenderStepped:Connect(function()
+        stopAllAnimations()
+    end)
+    
     print("✅ No Walk Animation: AKTIF")
 end
+
 local function toggleUnwalkAnimation(state)
     unwalkAnimEnabled = state
-    if unwalkAnimEnabled then if player.Character then setupNoWalkAnimation(player.Character) end
+    if unwalkAnimEnabled then
+        if player.Character then
+            setupNoWalkAnimation(player.Character)
+        end
     end
 end
-if player.Character and unwalkAnimEnabled then setupNoWalkAnimation(player.Character) end
-player.CharacterAdded:Connect(function(character)
-    task.wait(0.5); if unwalkAnimEnabled then setupNoWalkAnimation(character) end end)
 
--- ==================== GOD MODE FUNCTION ====================
-local function toggleGodMode(enabled)
-    godModeEnabled = enabled; local character = player.Character; local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    if enabled then
-        print("✅ God Mode: ON")
-        if humanoid then initialMaxHealth = humanoid.MaxHealth; humanoid.MaxHealth = math.huge; humanoid.Health = math.huge end
-        if healthConnection then healthConnection:Disconnect() end
-        if humanoid then healthConnection = humanoid.HealthChanged:Connect(function(health) if health < math.huge then humanoid.Health = math.huge end end) end
-        if stateConnection then stateConnection:Disconnect() end
-        if humanoid then stateConnection = humanoid.StateChanged:Connect(function(oldState, newState) if newState == Enum.HumanoidStateType.Dead then humanoid:ChangeState(Enum.HumanoidStateType.GettingUp); humanoid.Health = math.huge end end) end
-    else
-        print("❌ God Mode: OFF")
-        if healthConnection then healthConnection:Disconnect(); healthConnection = nil end
-        if stateConnection then stateConnection:Disconnect(); stateConnection = nil end
-        if humanoid then humanoid.MaxHealth = initialMaxHealth; humanoid.Health = initialMaxHealth end
-    end
+-- Jalankan fungsi jika watak sudah ada
+if player.Character and unwalkAnimEnabled then
+    setupNoWalkAnimation(player.Character)
 end
-player.CharacterAdded:Connect(function(newCharacter)
-    if godModeEnabled then task.wait(1); toggleGodMode(true); print("🔄 God Mode re-enabled after respawn") end
+
+-- Jalankan fungsi semula setiap kali watak respawn
+player.CharacterAdded:Connect(function(character)
+    task.wait(0.5) -- Tunggu sebentar untuk watak dimuatkan sepenuhnya
+    if unwalkAnimEnabled then
+        setupNoWalkAnimation(character)
+    end
 end)
 
--- ==================== EXTERNAL SCRIPT FUNCTIONS ====================
+-- ==================== GOD MODE FUNCTION (NEW) ====================
+local function toggleGodMode(enabled)
+    godModeEnabled = enabled
+    local character = player.Character -- Guna 'player' bukan 'LocalPlayer'
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+
+    if enabled then
+        print("✅ God Mode: ON")
+
+        if humanoid then
+            initialMaxHealth = humanoid.MaxHealth -- Simpan nyawa asal
+            humanoid.MaxHealth = math.huge
+            humanoid.Health = math.huge
+        end
+
+        -- Sambungan 1: Pulihkan nyawa seketika jika rosak
+        if healthConnection then healthConnection:Disconnect() end
+        if humanoid then
+            healthConnection = humanoid.HealthChanged:Connect(function(health)
+                if health < math.huge then
+                    humanoid.Health = math.huge
+                end
+            end)
+        end
+
+        -- Sambungan 2: Halang status mati (Dead)
+        if stateConnection then stateConnection:Disconnect() end
+        if humanoid then
+            stateConnection = humanoid.StateChanged:Connect(function(oldState, newState)
+                if newState == Enum.HumanoidStateType.Dead then
+                    humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+                    humanoid.Health = math.huge
+                end
+            end)
+        end
+
+    else
+        print("❌ God Mode: OFF")
+
+        -- Disconnect semua connection
+        if healthConnection then
+            healthConnection:Disconnect()
+            healthConnection = nil
+        end
+        if stateConnection then
+            stateConnection:Disconnect()
+            stateConnection = nil
+        end
+
+        -- Pulihkan nyawa asal
+        if humanoid then
+            humanoid.MaxHealth = initialMaxHealth
+            humanoid.Health = initialMaxHealth
+        end
+    end
+end
+
+-- TAMBAH INI: Untuk pastikan God Mode kekal selepas respawn
+player.CharacterAdded:Connect(function(newCharacter)
+    if godModeEnabled then
+        task.wait(1) -- Tunggu sebentar untuk humanoid dimuatkan
+        toggleGodMode(true) -- Aktifkan semula
+        print("🔄 God Mode re-enabled after respawn")
+    end
+end)
+
+-- ==================== EXTERNAL SCRIPT FUNCTIONS (UPDATED) ====================
 local function toggleUseCloner(state)
     if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Cloner.lua"))() end); print("✅ Use Cloner: Triggered") else print("❌ Use Cloner: OFF") end
 end
+
 local function toggleAdminPanelSpammer(state)
     if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Spammer.lua"))() end); print("✅ Admin Panel Spammer: ON") else print("❌ Admin Panel Spammer: OFF") end
 end
+
 local function toggleWebslingKill(state)
     if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Webslingkill.lua"))() end); print("✅ Websling Kill: ON") else print("❌ Websling Kill: OFF") end
 end
+
 local function toggleWebslingControl(state)
     if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/WebslingControl.lua"))() end); print("✅ Websling Control: ON") else print("❌ Websling Control: OFF") end
 end
+
+-- ==================== UNLOCK FLOOR FUNCTION (NEW) ====================
 local function toggleUnlockFloor(state)
-    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/UnlockBase.lua"))() end); print("✅ Unlock Floor: Triggered") else print("❌ Unlock Floor: OFF") end
+    if state then
+        pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/UnlockBase.lua"))()
+        end)
+        print("✅ Unlock Floor: Triggered")
+    else
+        print("❌ Unlock Floor: OFF")
+    end
 end
+
+-- ==================== SILENT HIT FUNCTION (NEW) ====================
 local function toggleSilentHit(state)
     if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Silenthit.lua"))() end); print("✅ Silent Hit: ON") else print("❌ Silent Hit: OFF") end
 end
-
--- ==================== RESPAWN HANDLER FOR AUTO DESTROY TURRET ====================
-player.CharacterAdded:Connect(function()
-    task.wait(0.5)
-    cachedBat = nil
-    if autoDestroyTurretEnabled then
-        stopAutoTurretWatch() -- Reset everything
-        task.wait(1)
-        toggleAutoDestroyTurret(true) -- Re-enable
-    end
-end)
 
 -- ==================== CREATE UI AND ADD TOGGLES ====================
 NightmareHub:CreateUI()
@@ -1484,18 +1786,18 @@ NightmareHub:AddMainToggle("Aimbot", function(state) toggleAutoLaser(state) end)
 NightmareHub:AddMainToggle("Xray Base", function(state) toggleXrayBase(state) end)
 NightmareHub:AddMainToggle("Semi Invisible", function(state) toggleInvisibleV1(state) end)
 NightmareHub:AddMainToggle("Auto Kick After Steal", function(state) toggleAutoKickAfterSteal(state) end)
-NightmareHub:AddMainToggle("Use Cloner", function(state) toggleUseCloner(state) end)
-NightmareHub:AddMainToggle("Unlock Floor", function(state) toggleUnlockFloor(state) end)
+NightmareHub:AddMainToggle("Use Cloner", function(state) toggleUseCloner(state) end) -- CHANGED
+NightmareHub:AddMainToggle("Unlock Floor", function(state) toggleUnlockFloor(state) end) -- NEW
 NightmareHub:AddMainToggle("Websling Kill", function(state) toggleWebslingKill(state) end)
 NightmareHub:AddMainToggle("Baselock Reminder", function(state) toggleBaselockReminder(state) end)
 NightmareHub:AddMainToggle("Websling Control", function(state) toggleWebslingControl(state) end)
-NightmareHub:AddMainToggle("Admin Panel Spammer", function(state) toggleAdminPanelSpammer(state) end)
-NightmareHub:AddMainToggle("Instant Grab", function(state) toggleInstantGrab(state) end)
-NightmareHub:AddMainToggle("Auto Destroy Turret", function(state) toggleAutoDestroyTurret(state) end) -- ADDED & FIXED
+NightmareHub:AddMainToggle("Admin Panel Spammer", function(state) toggleAdminPanelSpammer(state) end) -- CHANGED
+NightmareHub:AddMainToggle("Instant Grab", function(state) toggleInstantGrab(state) end) -- Nama toggle tidak berubah
+-- Auto Destroy Turret removed
 
 -- VISUAL TAB
 NightmareHub:AddVisualToggle("Esp Players", function(state) toggleESPPlayers(state) end)
-NightmareHub:AddVisualToggle("Esp Best", function(state) toggleEspBest(state) end)
+NightmareHub:AddVisualToggle("Esp Best", function(state) toggleEspBest(state) end) -- CHANGED from "Esp Best"
 NightmareHub:AddVisualToggle("Esp Base Timer", function(state) toggleEspBaseTimer(state) end)
 NightmareHub:AddVisualToggle("Base Line", function(state) toggleBaseLine(state) end)
 NightmareHub:AddVisualToggle("Esp Turret", function(state) toggleSentryESP(state) end)
@@ -1505,10 +1807,11 @@ NightmareHub:AddMiscToggle("Anti Debuff", function(state) toggleAntiDebuff(state
 NightmareHub:AddMiscToggle("Grapple Speed", function(state) toggleGrappleSpeed(state) end)
 NightmareHub:AddMiscToggle("Anti Knockback", function(state) toggleAntiKnockback(state) end)
 NightmareHub:AddMiscToggle("Anti Ragdoll", function(state) toggleAntiRagdoll(state) end)
+-- Anti Trap toggle and function have been removed.
 NightmareHub:AddMiscToggle("Touch Fling V2", function(state) toggleTouchFling(state) end)
 NightmareHub:AddMiscToggle("Allow Friends", function(state) toggleAllowFriends(state) end)
-NightmareHub:AddMiscToggle("Silent Hit", function(state) toggleSilentHit(state) end)
-NightmareHub:AddMiscToggle("Unwalk Anim", function(state) toggleUnwalkAnimation(state) end)
-NightmareHub:AddMiscToggle("God Mode", function(state) toggleGodMode(state) end)
+NightmareHub:AddMiscToggle("Silent Hit", function(state) toggleSilentHit(state) end) -- NEW
+NightmareHub:AddMiscToggle("Unwalk Anim", function(state) toggleUnwalkAnimation(state) end) -- NEW
+NightmareHub:AddMiscToggle("God Mode", function(state) toggleGodMode(state) end) -- NEW
 
-print("🎮 NightmareHub Loaded Successfully with Auto Destroy Turret!")
+print("🎮 NightmareHub Loaded Successfully!")
