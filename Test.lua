@@ -155,9 +155,6 @@ local healthConnection = nil
 local stateConnection = nil
 local initialMaxHealth = 100
 
--- Auto Destroy Turret Variables --[ADDED]
-local autoDestroyTurretEnabled = false --[ADDED]
-
 -- ==================== PLATFORM FUNCTION ====================
 local function createPlatform()
     if platformPart then return end
