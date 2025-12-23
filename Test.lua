@@ -13,7 +13,7 @@
     - [UPDATED] Base Line now targets the "PlotSign" in the player's plot.
     - [ADDED] "Unwalk Anim" toggle to the Misc tab.
     - [ADDED] "God Mode" toggle to the Misc tab.
-    - [ADDED] "Auto Destroy Sentry" (V11) toggle to the Main tab.
+    - [ADDED] "Auto Destroy Sentry" toggle to Main tab (New Feature).
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -149,24 +149,19 @@ local healthConnection = nil
 local stateConnection = nil
 local initialMaxHealth = 100
 
--- Auto Destroy Sentry Variables (NEW - V11)
-local autoDestroySentryEnabled = false
+-- Auto Destroy Sentry Variables (NEW)
+local sentryEnabled = false
 local sentryConn = nil
 local lightCheckConn = nil
 local activeSentries = {}
 local sentrySpawnTimes = {}
-local MAX_HITS = 150
-local NEW_SENTRY_DELAY = 4.0
 local cachedBat = nil
 local batCacheTime = 0
-local BAT_CACHE_DURATION = 0.3
-
+local NEW_SENTRY_DELAY = 4.0
+local MAX_HITS = 100
+local BAT_CACHE_DURATION = 5
 
 -- ==================== ALL FEATURE FUNCTIONS ====================
--- (Pasted from previous response for brevity)
-
--- [PASTE SEMUA FUNCTION DARI JAWAPAN SEBELUMNYA DI SINI]
--- Saya akan sertakan kesemuanya di bawah untuk kemudahan
 
 -- ==================== PLATFORM FUNCTION ====================
 local function createPlatform()
@@ -1757,28 +1752,95 @@ player.CharacterAdded:Connect(function(newCharacter)
     end
 end)
 
--- ==================== AUTO DESTROY SENTRY (V11) FUNCTION ====================
--- === HELPER FUNCTIONS ===
+-- ==================== EXTERNAL SCRIPT FUNCTIONS (UPDATED) ====================
+local function toggleUseCloner(state)
+    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Cloner.lua"))() end); print("✅ Use Cloner: Triggered") else print("❌ Use Cloner: OFF") end
+end
+
+local function toggleAdminPanelSpammer(state)
+    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Spammer.lua"))() end); print("✅ Admin Panel Spammer: ON") else print("❌ Admin Panel Spammer: OFF") end
+end
+
+local function toggleWebslingKill(state)
+    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Webslingkill.lua"))() end); print("✅ Websling Kill: ON") else print("❌ Websling Kill: OFF") end
+end
+
+local function toggleWebslingControl(state)
+    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/WebslingControl.lua"))() end); print("✅ Websling Control: ON") else print("❌ Websling Control: OFF") end
+end
+
+-- ==================== UNLOCK FLOOR FUNCTION (NEW) ====================
+local function toggleUnlockFloor(state)
+    if state then
+        pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/UnlockBase.lua"))()
+        end)
+        print("✅ Unlock Floor: Triggered")
+    else
+        print("❌ Unlock Floor: OFF")
+    end
+end
+
+-- ==================== SILENT HIT FUNCTION (NEW) ====================
+local function toggleSilentHit(state)
+    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Silenthit.lua"))() end); print("✅ Silent Hit: ON") else print("❌ Silent Hit: OFF") end
+end
+
+-- ==================== AUTO DESTROY SENTRY FUNCTIONS (NEW) ====================
 local function isOwnedByPlayer(sentry)
-    -- PRIMARY METHOD: Check if UserId is in sentry name
     local sentryName = sentry.Name
     local myUserId = tostring(player.UserId)
     
     if string.find(sentryName, myUserId) then
+        print("[🔍] MATCH! UserId found in sentry name: " .. sentryName)
         return true
     end
     
-    -- BACKUP METHOD: Check if player name is in sentry name
+    print("[🔍] No UserId match in name: " .. sentryName .. " (Your ID: " .. myUserId .. ")")
+    
     if string.find(sentryName:lower(), player.Name:lower()) then
+        print("[🔍] Player name found in sentry name!")
         return true
     end
     
-    -- No match found - it's an enemy sentry
+    local function searchForOwner(parent)
+        for _, child in ipairs(parent:GetDescendants()) do
+            if child.Name == "Owner" or child.Name == "Creator" or child.Name == "PlacedBy" then
+                if child:IsA("ObjectValue") and child.Value == player then
+                    print("[🔍] Found ObjectValue owner match!")
+                    return true
+                elseif child:IsA("StringValue") and (child.Value == player.Name or child.Value == myUserId) then
+                    print("[🔍] Found StringValue owner match!")
+                    return true
+                elseif (child:IsA("IntValue") or child:IsA("NumberValue")) and child.Value == player.UserId then
+                    print("[🔍] Found UserId match!")
+                    return true
+                end
+            end
+        end
+        return false
+    end
+    
+    if searchForOwner(sentry) then
+        return true
+    end
+    
+    local possibleAttributes = {"PlayerUserId", "UserId", "CreatorId", "PlacedByUserId", "PlayerId", "Owner", "Creator"}
+    for _, attrName in ipairs(possibleAttributes) do
+        local attrValue = sentry:GetAttribute(attrName)
+        if attrValue then
+            if attrValue == player.UserId or attrValue == myUserId or attrValue == player.Name then
+                print("[🔍] Attribute match via " .. attrName)
+                return true
+            end
+        end
+    end
+    
+    print("[🔍] Enemy sentry confirmed!")
     return false
 end
 
 local function findBat()
-    -- FPS BOOST: Use cached bat if still valid
     local currentTime = tick()
     if cachedBat and cachedBat.Parent and (currentTime - batCacheTime) < BAT_CACHE_DURATION then
         return cachedBat
@@ -1820,13 +1882,12 @@ local function unequipBat()
     end
 end
 
--- === MAIN DESTROY LOGIC ===
 local function destroySentry(desc, isNewlyPlaced)
-    if not autoDestroySentryEnabled then return end
+    if not sentryEnabled then return end
     if activeSentries[desc] then return end
     
-    -- CHECK IF IT'S OUR OWN SENTRY - SKIP IT!
     if isOwnedByPlayer(desc) then
+        print("[🛡️] Skipping own sentry: " .. desc.Name)
         return
     end
     
@@ -1836,28 +1897,35 @@ local function destroySentry(desc, isNewlyPlaced)
 
     activeSentries[desc] = true
 
-    if not desc.Parent or not autoDestroySentryEnabled then 
+    if not desc.Parent or not sentryEnabled then 
         activeSentries[desc] = nil
         return 
     end
 
-    -- If newly placed, wait before attacking
     if isNewlyPlaced then
+        print("[⏳] New enemy sentry detected - waiting 4.0s...")
         task.wait(NEW_SENTRY_DELAY)
         
-        if not desc.Parent or not autoDestroySentryEnabled then
+        if not desc.Parent or not sentryEnabled then
             activeSentries[desc] = nil
             return
         end
         
         if isOwnedByPlayer(desc) then
+            print("[🛡️] Sentry became ours - skipping!")
             activeSentries[desc] = nil
             return
         end
+        
+        print("[✅] Wait complete - engaging!")
     end
+
+    print("[💎] HYBRID BYPASS - Enemy sentry locked!")
+    print("[🔥] Attacking until destroyed...")
 
     local bat = findBat()
     if not bat then
+        warn("[⚠️] Bat not found!")
         activeSentries[desc] = nil
         return
     end
@@ -1865,9 +1933,8 @@ local function destroySentry(desc, isNewlyPlaced)
     local hitCount = 0
     local running = true
     
-    -- THREAD 1: Equip/Unequip Cycle
     task.spawn(function()
-        while running and autoDestroySentryEnabled and desc.Parent do
+        while running and sentryEnabled and desc.Parent do
             equipBat()
             task.wait(0.05)
             if not running then break end
@@ -1876,32 +1943,36 @@ local function destroySentry(desc, isNewlyPlaced)
         end
     end)
     
-    -- THREAD 2: Position + Spam Attack Loop
     task.spawn(function()
         task.wait(0.1)
         
         local spamConnection
-        local frameSkip = 0 -- FPS BOOST: Skip some frames
+        local frameSkip = 0
         
         spamConnection = RunService.Heartbeat:Connect(function()
-            -- FPS BOOST: Process every other frame for lighter load
             frameSkip = frameSkip + 1
             if frameSkip % 2 == 0 then
-                -- Skip this frame for FPS boost
                 return
             end
             
-            if not autoDestroySentryEnabled or not desc.Parent or hitCount >= MAX_HITS then
+            if not sentryEnabled or not desc.Parent or hitCount >= MAX_HITS then
                 running = false
-                if spamConnection then spamConnection:Disconnect() end
+                if spamConnection then
+                    spamConnection:Disconnect()
+                end
                 unequipBat()
                 activeSentries[desc] = nil
                 sentrySpawnTimes[desc] = nil
                 cachedBat = nil
+                
+                if not desc.Parent then
+                    print("[✅] Enemy sentry DESTROYED! Total hits: " .. hitCount)
+                else
+                    print("[⏹️] Attack stopped. Hits: " .. hitCount)
+                end
                 return
             end
             
-            -- CONTINUOUSLY reposition sentry in front of player
             local currentChar = player.Character
             if currentChar and currentChar:FindFirstChild("HumanoidRootPart") then
                 local currentHrp = currentChar.HumanoidRootPart
@@ -1920,7 +1991,6 @@ local function destroySentry(desc, isNewlyPlaced)
                 end)
             end
             
-            -- SPAM ATTACK
             local currentBat = findBat()
             if currentBat and currentBat.Parent == player.Character then
                 for i = 1, 12 do
@@ -1936,17 +2006,36 @@ local function destroySentry(desc, isNewlyPlaced)
     end)
 end
 
--- === DETECTION LOGIC ===
 local function lightweightCheck()
-    if not autoDestroySentryEnabled then return end
+    if not sentryEnabled then return end
     
     for _, child in ipairs(workspace:GetChildren()) do
-        if autoDestroySentryEnabled and (child:IsA("Model") or child:IsA("BasePart")) then
+        if sentryEnabled and (child:IsA("Model") or child:IsA("BasePart")) then
             if string.find(child.Name:lower(), "sentry") and not activeSentries[child] and child.Parent then
                 if not isOwnedByPlayer(child) then
+                    print("[🔍] Periodic check found enemy sentry!")
                     task.spawn(function()
                         destroySentry(child, false)
                     end)
+                end
+            end
+        end
+    end
+    
+    local folders = {"Map", "Assets", "Entities", "NPCs", "Spawns"}
+    for _, folderName in ipairs(folders) do
+        local folder = workspace:FindFirstChild(folderName)
+        if folder then
+            for _, child in ipairs(folder:GetChildren()) do
+                if sentryEnabled and (child:IsA("Model") or child:IsA("BasePart")) then
+                    if string.find(child.Name:lower(), "sentry") and not activeSentries[child] and child.Parent then
+                        if not isOwnedByPlayer(child) then
+                            task.spawn(function()
+                                destroySentry(child, false)
+                            end)
+                            break
+                        end
+                    end
                 end
             end
         end
@@ -1957,38 +2046,43 @@ local function startSentryWatch()
     if sentryConn then sentryConn:Disconnect() end
     if lightCheckConn then lightCheckConn:Disconnect() end
     
-    -- METHOD 1: Instant event detection
     sentryConn = workspace.DescendantAdded:Connect(function(desc)
-        if not autoDestroySentryEnabled then return end
+        if not sentryEnabled then return end
         if not desc:IsA("Model") and not desc:IsA("BasePart") then return end
         
         if string.find(desc.Name:lower(), "sentry") then
-            if desc.Parent and autoDestroySentryEnabled and not activeSentries[desc] then
+            print("[🆕] Event detected NEW sentry - checking ownership...")
+            
+            if desc.Parent and sentryEnabled and not activeSentries[desc] then
                 if not isOwnedByPlayer(desc) then
+                    print("[⚔️] Enemy sentry confirmed - will wait 4.0s!")
                     sentrySpawnTimes[desc] = tick()
+                    
                     task.spawn(function()
                         destroySentry(desc, true)
                     end)
+                else
+                    print("[🛡️] Own sentry detected - ignoring!")
                 end
             end
         end
     end)
     
-    -- METHOD 2: Lightweight periodic check
     lightCheckConn = RunService.Heartbeat:Connect(function()
-        if not autoDestroySentryEnabled then return end
+        if not sentryEnabled then return end
         task.wait(1.2)
         lightweightCheck()
     end)
     
-    -- Initial sweep
     task.spawn(function()
+        print("[🔍] Initial sentry sweep...")
         lightweightCheck()
+        print("[✅] Initial sweep complete!")
     end)
 end
 
 local function stopSentryWatch()
-    autoDestroySentryEnabled = false
+    sentryEnabled = false
     
     if sentryConn then
         sentryConn:Disconnect()
@@ -2006,63 +2100,16 @@ local function stopSentryWatch()
     unequipBat()
 end
 
--- === MAIN TOGGLE FUNCTION ===
-local function toggleAutoDestroySentry(enabled)
-    autoDestroySentryEnabled = enabled
-    
-    if enabled then
-        print("✅ Auto Destroy Sentry: ON")
-        startSentryWatch()
-    else
-        print("❌ Auto Destroy Sentry: OFF")
-        stopSentryWatch()
-    end
-end
-
--- Respawn handler
-player.CharacterAdded:Connect(function()
-    task.wait(0.5)
-    cachedBat = nil
-    if autoDestroySentryEnabled then
-        stopSentryWatch()
-        autoDestroySentryEnabled = false
-        task.wait(1)
-        toggleAutoDestroySentry(true)
-    end
-end)
-
--- ==================== EXTERNAL SCRIPT FUNCTIONS (UPDATED) ====================
-local function toggleUseCloner(state)
-    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Cloner.lua"))() end); print("✅ Use Cloner: Triggered") else print("❌ Use Cloner: OFF") end
-end
-
-local function toggleAdminPanelSpammer(state)
-    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Spammer.lua"))() end); print("✅ Admin Panel Spammer: ON") else print("❌ Admin Panel Spammer: OFF") end
-end
-
-local function toggleWebslingKill(state)
-    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Webslingkill.lua"))() end); print("✅ Websling Kill: ON") else print("❌ Websling Kill: OFF") end
-end
-
-local function toggleWebslingControl(state)
-    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/WebslingControl.lua"))() end); print("✅ Websling Control: ON") else print("❌ Websling Control: OFF") end
-end
-
--- ==================== UNLOCK FLOOR FUNCTION (NEW) ====================
-local function toggleUnlockFloor(state)
+local function toggleAutoDestroySentry(state)
     if state then
-        pcall(function()
-            loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/UnlockBase.lua"))()
-        end)
-        print("✅ Unlock Floor: Triggered")
+        sentryEnabled = true
+        startSentryWatch()
+        print("✅ Auto Destroy Sentry: ON")
     else
-        print("❌ Unlock Floor: OFF")
+        sentryEnabled = false
+        stopSentryWatch()
+        print("❌ Auto Destroy Sentry: OFF")
     end
-end
-
--- ==================== SILENT HIT FUNCTION (NEW) ====================
-local function toggleSilentHit(state)
-    if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Silenthit.lua"))() end); print("✅ Silent Hit: ON") else print("❌ Silent Hit: OFF") end
 end
 
 -- ==================== CREATE UI AND ADD TOGGLES ====================
@@ -2081,7 +2128,7 @@ NightmareHub:AddMainToggle("Baselock Reminder", function(state) toggleBaselockRe
 NightmareHub:AddMainToggle("Websling Control", function(state) toggleWebslingControl(state) end)
 NightmareHub:AddMainToggle("Admin Panel Spammer", function(state) toggleAdminPanelSpammer(state) end) -- CHANGED
 NightmareHub:AddMainToggle("Instant Grab", function(state) toggleInstantGrab(state) end) -- Nama toggle tidak berubah
-NightmareHub:AddMainToggle("Auto Destroy Sentry", function(state) toggleAutoDestroySentry(state) end) -- NEW (V11)
+NightmareHub:AddMainToggle("Auto Destroy Sentry", function(state) toggleAutoDestroySentry(state) end) -- ADDED
 
 -- VISUAL TAB
 NightmareHub:AddVisualToggle("Esp Players", function(state) toggleESPPlayers(state) end)
