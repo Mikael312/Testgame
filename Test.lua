@@ -1611,12 +1611,9 @@ end
 player.CharacterAdded:Connect(function(newCharacter) if antiBoogieEnabled then task.wait(0.5); setupInstantAnimationBlocker(); print("🔄 Reloaded animation blocker after respawn") end end)
 
 -- ==================== UNWALK ANIM FUNCTION (NEW) ====================
-local function startUnwalkAnimation(character)
+local function setupNoWalkAnimation(character)
     character = character or player.Character
     if not character then return end
-
-    -- Disconnect any existing connections first
-    stopUnwalkAnimation()
 
     local humanoid = character:WaitForChild("Humanoid")
     local animator = humanoid:WaitForChild("Animator")
@@ -1630,58 +1627,50 @@ local function startUnwalkAnimation(character)
         end
     end
     
-    -- Initial stop
-    stopAllAnimations()
+    -- Hentikan animasi semasa berlari
+    humanoid.Running:Connect(function(speed)
+        stopAllAnimations()
+    end)
     
-    -- Stop animations when running
-    local runningConn = humanoid.Running:Connect(stopAllAnimations)
-    table.insert(unwalkAnimConnections, runningConn)
-
-    -- Stop animations when jumping
-    local jumpingConn = humanoid.Jumping:Connect(stopAllAnimations)
-    table.insert(unwalkAnimConnections, jumpingConn)
+    -- Hentikan animasi semasa melompat
+    humanoid.Jumping:Connect(function()
+        stopAllAnimations()
+    end)
     
-    -- Stop any new animations that try to play
-    local animPlayedConn = animator.AnimationPlayed:Connect(function(animationTrack)
+    -- Hentikan sebarang animasi baru yang cuba dimainkan
+    animator.AnimationPlayed:Connect(function(animationTrack)
         animationTrack:Stop()
     end)
-    table.insert(unwalkAnimConnections, animPlayedConn)
     
-    -- Continuous stop on RenderStepped (can be performance heavy)
-    local renderSteppedConn = RunService.RenderStepped:Connect(stopAllAnimations)
-    table.insert(unwalkAnimConnections, renderSteppedConn)
+    -- Hentikan animasi secara berterusan pada setiap frame
+    RunService.RenderStepped:Connect(function()
+        stopAllAnimations()
+    end)
     
-    print("🚫 Unwalk Animation: ACTIVE")
-end
-
-local function stopUnwalkAnimation()
-    for _, connection in pairs(unwalkAnimConnections) do
-        if connection then
-            connection:Disconnect()
-        end
-    end
-    unwalkAnimConnections = {}
-    print("🚫 Unwalk Animation: INACTIVE")
+    print("✅ No Walk Animation: AKTIF")
 end
 
 local function toggleUnwalkAnimation(state)
     unwalkAnimEnabled = state
     if unwalkAnimEnabled then
         if player.Character then
-            startUnwalkAnimation(player.Character)
+            setupNoWalkAnimation(player.Character)
         end
-    else
-        stopUnwalkAnimation()
     end
 end
 
-player.CharacterAdded:Connect(function(newCharacter)
+-- Jalankan fungsi jika watak sudah ada
+if player.Character and unwalkAnimEnabled then
+    setupNoWalkAnimation(player.Character)
+end
+
+-- Jalankan fungsi semula setiap kali watak respawn
+player.CharacterAdded:Connect(function(character)
+    task.wait(0.5) -- Tunggu sebentar untuk watak dimuatkan sepenuhnya
     if unwalkAnimEnabled then
-        task.wait(1) -- Wait for character to load
-        startUnwalkAnimation(newCharacter)
-        print("🔄 Reloaded Unwalk Animation after respawn")
+        setupNoWalkAnimation(character)
     end
-end)
+end)    
 
 -- ==================== EXTERNAL SCRIPT FUNCTIONS (UPDATED) ====================
 local function toggleUseCloner(state)
