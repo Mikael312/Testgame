@@ -10,12 +10,11 @@
     - Added "Unlock Floor" to Main tab.
     - [FIXED] ESP Base Timer flickering issue.
     - [FIXED] Instant Grab performance drop (FPS).
-    - [UPDATED] Base Line now targets "PlotSign" in the player's plot.
+    - [UPDATED] Base Line now targets the "PlotSign" in the player's plot.
     - [ADDED] "Unwalk Anim" toggle to the Misc tab.
     - [ADDED] "God Mode" toggle to the Misc tab.
     - [ADDED] "Auto Destroy Sentry" (External Load) to Main tab.
-    - [ADDED] "Esp Trap" to Visual tab.
-    - [REMOVED] "Esp Turret" to prevent clashes.
+    - [REMOVED] "Esp Turret" function and toggle.
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -145,12 +144,6 @@ local godModeEnabled = false
 local healthConnection = nil
 local stateConnection = nil
 local initialMaxHealth = 100
-
--- Esp Trap Variables (NEW - INTEGRATED)
-local espTrapEnabled = false
-local trapHighlights = {}
-local trapScanConnection = nil
-local trapAddedConnection = nil
 
 -- ==================== ALL FEATURE FUNCTIONS ====================
 
@@ -1129,7 +1122,7 @@ local function startInstantGrab()
         RunService.Heartbeat:Connect(function()
             local now = tick()
             -- *** FIX: Reduced update frequency to improve performance ***
-            if now - lastUpdate >= 0.25 then -- Changed from 0.05 to 0.25
+            if now - lastUpdate >=0.25 then -- Changed from 0.05 to 0.25
                 currentPrompt, currentDistance = findNearestPrompt()
                 lastUpdate = now
             end
@@ -1355,7 +1348,7 @@ end
 local function findNearestAllowed()
     if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return nil end
     local myPos = player.Character.HumanoidRootPart.Position; local nearest = nil; local nearestDist = math.huge
-    for _, pl in ipairs(Players:GetPlayers()) do if isValidTarget(pl) then local targetHRP = pl.Character:FindFirstChild("HumanoidRootPart"); if targetHRP then local d = (Vector3.new(targetHRP.Position.X, 0, targetHRP.Position.Z) - Vector3.new(myPos.X, 0, myPos.Z)).Magnitude; if d < nearestDist then nearestDist = d; nearest = pl end end end
+    for _, pl in ipairs(Players:GetPlayers()) do if isValidTarget(pl) then local targetHRP = pl.Character:FindFirstChild("HumanoidRootPart"); if targetHRP then local d = (Vector3.new(targetHRP.Position.X, 0, targetHRP.Position.Z) - Vector3.new(myPos.X, 0, myPos.Z)).Magnitude; if d < nearestDist then nearestDist = d; nearest = pl end end end end
     return nearest
 end
 
@@ -1703,100 +1696,6 @@ player.CharacterAdded:Connect(function(newCharacter)
     end
 end)
 
--- ==================== ESP TRAP FUNCTION (NEW - INTEGRATED) ====================
-local function clearTrapHighlights()
-    for _, obj in pairs(trapHighlights) do
-        if obj and obj.Parent then
-            obj:Destroy()
-        end
-    end
-    trapHighlights = {}
-end
-
-local function addTrapHighlight(object)
-    -- Check if already highlighted
-    if object:FindFirstChild("TrapHighlight") then return end
-    
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "TrapHighlight"
-    highlight.Adornee = object
-    highlight.FillTransparency = 0.5
-    highlight.OutlineTransparency = 0
-    
-    -- All bright red for everything
-    highlight.FillColor = Color3.fromRGB(255, 0, 0) -- Bright red
-    highlight.OutlineColor = Color3.fromRGB(255, 50, 50) -- Bright red outline
-    
-    highlight.Parent = object
-    
-    table.insert(trapHighlights, {Object = object, Highlight = highlight})
-    print("🎯 ESP Added:", object.Name)
-end
-
-local function scanForTraps()
-    -- Optimized scan to avoid heavy lag
-    for _, obj in pairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") or obj:IsA("Model") or obj:IsA("MeshPart") then
-            local name = obj.Name:lower()
-            
-            if name:find("subspace") and name:find("mine") then
-                addTrapHighlight(obj)
-            elseif name:find("trap") then
-                addTrapHighlight(obj)
-            elseif name:find("mine") and not name:find("mining") then
-                -- Also catch generic "mine" objects
-                addTrapHighlight(obj)
-            end
-        end
-    end
-    
-    print("✅ Found " .. #trapHighlights .. " traps")
-end
-
-local function toggleEspTrap(state)
-    espTrapEnabled = state
-    
-    if state then
-        print("🔍 Esp Trap: ON")
-        scanForTraps() -- Initial Scan
-        
-        -- Listen for new objects added to workspace
-        trapAddedConnection = Workspace.DescendantAdded:Connect(function(child)
-            if espTrapEnabled then
-                if child:IsA("BasePart") or child:IsA("Model") or child:IsA("MeshPart") then
-                    local name = child.Name:lower()
-                    
-                    if (name:find("subspace") and name:find("mine")) or 
-                       name:find("trap") or 
-                       (name:find("mine") and not name:find("mining")) then
-                        
-                        -- Only add if not already highlighted
-                        if not child:FindFirstChild("TrapHighlight") then
-                            addTrapHighlight(child)
-                        end
-                    end
-                end
-            end
-        end)
-        
-        -- Periodic re-scan (Optimized to run every 2 seconds based on your code logic)
-        trapScanConnection = RunService.Heartbeat:Connect(function()
-            if tick() % 6 < 0.016 then -- Throttle to run every ~2 seconds
-                if espTrapEnabled then
-                    scanForTraps()
-                end
-            end
-        end)
-        
-    else
-        print("🛑 Esp Trap: OFF")
-        clearTrapHighlights()
-        
-        if trapAddedConnection then trapAddedConnection:Disconnect(); trapAddedConnection = nil end
-        if trapScanConnection then trapScanConnection:Disconnect(); trapScanConnection = nil end
-    end
-end
-
 -- ==================== EXTERNAL SCRIPT FUNCTIONS (UPDATED) ====================
 local function toggleUseCloner(state)
     if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Cloner.lua"))() end); print("✅ Use Cloner: Triggered") else print("❌ Use Cloner: OFF") end
@@ -1835,7 +1734,6 @@ end
 local function toggleAutoDestroySentry(state)
     if state then
         pcall(function()
-            -- Loadstring external script to avoid "nil value" errors from internal logic
             loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/DestroyTurret.lua"))()
         end)
         print("✅ Auto Destroy Sentry: Loaded")
@@ -1867,8 +1765,7 @@ NightmareHub:AddVisualToggle("Esp Players", function(state) toggleESPPlayers(sta
 NightmareHub:AddVisualToggle("Esp Best", function(state) toggleEspBest(state) end) -- CHANGED from "Esp Best"
 NightmareHub:AddVisualToggle("Esp Base Timer", function(state) toggleEspBaseTimer(state) end)
 NightmareHub:AddVisualToggle("Base Line", function(state) toggleBaseLine(state) end)
-NightmareHub:AddVisualToggle("Esp Trap", function(state) toggleEspTrap(state) end) -- NEW (MOVED TO VISUAL)
--- Esp Turret removed from here
+-- Esp Turret removed here
 
 -- MISC TAB
 NightmareHub:AddMiscToggle("Anti Debuff", function(state) toggleAntiDebuff(state) end)
