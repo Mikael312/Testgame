@@ -1985,7 +1985,7 @@ local function toggleAntiKnockback(state)
     end
 end
 
--- ==================== XRAY BASE FUNCTIONS ====================
+-- ==================== XRAY BASE FUNCTIONS (FIXED VERSION) ====================
 local function isBaseWall(obj)
     if not obj:IsA("BasePart") then return false end
     local n = obj.Name:lower()
@@ -1994,40 +1994,85 @@ local function isBaseWall(obj)
 end
 
 local function tryApplyInvisibleWalls()
-    if not xrayBaseEnabled then return end
+    if not xrayBaseEnabled or invisibleWallsLoaded then return end
     
     local plots = workspace:FindFirstChild("Plots")
-    if not plots then return end
-    if #plots:GetChildren() == 0 then return end
+    if not plots or #plots:GetChildren() == 0 then 
+        print("❌ No plots found for Xray Base")
+        return 
+    end
     
-    if invisibleWallsLoaded then return end
-    invisibleWallsLoaded = true
+    print("🔍 Applying Xray to base walls...")
+    local processedCount = 0
     
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.Anchored and obj.CanCollide and isBaseWall(obj) then
-            originalTransparency[obj] = obj.LocalTransparencyModifier
-            obj.LocalTransparencyModifier = 0.85
+    -- Hanya proses objek dalam plots untuk performance yang lebih baik
+    for _, plot in pairs(plots:GetChildren()) do
+        for _, obj in pairs(plot:GetDescendants()) do
+            if obj:IsA("BasePart") and obj.Anchored and obj.CanCollide and isBaseWall(obj) then
+                if not originalTransparency[obj] then
+                    originalTransparency[obj] = obj.LocalTransparencyModifier
+                    obj.LocalTransparencyModifier = 0.85
+                    processedCount = processedCount + 1
+                end
+            end
         end
     end
     
-    if xrayBaseConnection then xrayBaseConnection:Disconnect() end
-    xrayBaseConnection = workspace.DescendantAdded:Connect(function(obj)
-        if xrayBaseEnabled and isBaseWall(obj) then
-            originalTransparency[obj] = obj.LocalTransparencyModifier
-            obj.LocalTransparencyModifier = 0.85
+    invisibleWallsLoaded = true
+    print("✅ Applied Xray to " .. processedCount .. " base walls")
+end
+
+local function cleanupRemovedParts()
+    -- Cleanup parts yang sudah dihapus dari game
+    for obj, _ in pairs(originalTransparency) do
+        if not obj or not obj.Parent then
+            originalTransparency[obj] = nil
         end
-    end)
+    end
 end
 
 local function enableXrayBase()
-    if xrayBaseEnabled then return end
-    xrayBaseEnabled = true
+    if xrayBaseEnabled then 
+        print("⚠️ Xray Base already enabled")
+        return 
+    end
     
+    xrayBaseEnabled = true
+    invisibleWallsLoaded = false
+    
+    -- Bersihkan dahulu
+    cleanupRemovedParts()
+    
+    -- Apply dengan delay untuk mengelakkan lag
     task.spawn(function()
-        for _ = 1, 20 do
-            tryApplyInvisibleWalls()
-            if invisibleWallsLoaded then return end
-            task.wait(0.5)
+        task.wait(0.5) -- Beri masa untuk UI dimuatkan
+        tryApplyInvisibleWalls()
+    end)
+    
+    -- Setup event handler dengan disconnect yang betul
+    if xrayBaseConnection then
+        xrayBaseConnection:Disconnect()
+    end
+    
+    xrayBaseConnection = workspace.DescendantAdded:Connect(function(obj)
+        if not xrayBaseEnabled then return end
+        
+        task.wait(0.1) -- Delay kecil untuk stability
+        
+        if isBaseWall(obj) and obj:IsA("BasePart") and obj.Anchored and obj.CanCollide then
+            if not originalTransparency[obj] then
+                originalTransparency[obj] = obj.LocalTransparencyModifier
+                obj.LocalTransparencyModifier = 0.85
+                print("🔍 Applied Xray to new base wall: " .. obj.Name)
+            end
+        end
+    end)
+    
+    -- Cleanup connection untuk parts yang dihapus
+    local cleanupConnection
+    cleanupConnection = workspace.DescendantRemoving:Connect(function(obj)
+        if originalTransparency[obj] then
+            originalTransparency[obj] = nil
         end
     end)
     
@@ -2035,25 +2080,36 @@ local function enableXrayBase()
 end
 
 local function disableXrayBase()
-    if not xrayBaseEnabled then return end
+    if not xrayBaseEnabled then 
+        print("⚠️ Xray Base already disabled")
+        return 
+    end
+    
     xrayBaseEnabled = false
     invisibleWallsLoaded = false
     
+    -- Disconnect semua connections
     if xrayBaseConnection then
         xrayBaseConnection:Disconnect()
         xrayBaseConnection = nil
     end
     
-    for part, value in pairs(originalTransparency) do
-        if part then
-            part.LocalTransparencyModifier = value
+    -- Pulihkan transparency untuk semua parts
+    local restoredCount = 0
+    for obj, value in pairs(originalTransparency) do
+        if obj and obj.Parent then
+            pcall(function()
+                obj.LocalTransparencyModifier = value
+                restoredCount = restoredCount + 1
+            end)
         end
     end
-    originalTransparency = {}
     
+    originalTransparency = {}
+    print("✅ Restored " .. restoredCount .. " base walls")
     print("❌ Xray Base Disabled")
 end
-
+    
 -- ==================== FPS BOOST FUNCTIONS ====================
 local function addThread(func)
     local t = task.spawn(func)
