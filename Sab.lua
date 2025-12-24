@@ -5,7 +5,7 @@
     - "Unwalk Animation" changed to "Admin Panel Spammer"
     - Added "Silent Hit" to Misc tab
     - Replaced "Esp Best" with "Brainrot ESP V3" (Module-Based Calculation)
-    - "Instant Grab" function updated to "Instant Pickup" logic for better range and reliability.
+    - "Instant Grab" REMOVED and REPLACED with "Auto Steal Nearest".
     - "Anti Trap" feature has been removed.
     - Added "Unlock Floor" to Main tab.
     - [FIXED] ESP Base Timer flickering issue.
@@ -15,6 +15,7 @@
     - [ADDED] "God Mode" toggle to the Misc tab.
     - [REMOVED] "Esp Turret" and "Auto Destroy Sentry".
     - [ADDED] "Esp Trap" to Visual Toggle.
+    - [UPDATED] "Auto Steal Nearest" logic with internal callbacks.
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -91,9 +92,15 @@ local isMonitoring = false
 local lastStealCount = 0
 local monitoringLoop = nil
 
--- Instant Grab Variables
-local instantGrabEnabled = false
-local instantGrabThread = nil
+-- Auto Steal Nearest Variables (REPLACED Instant Grab)
+local autoStealEnabled = false
+local autoStealConnection = nil
+local autoStealScanThread = nil
+local allAnimalsCache = {}
+local PromptMemoryCache = {}
+local InternalStealCache = {}
+local ModulesLoaded = false
+local Synchronizer, AnimalsData, RaritiesData, AnimalsShared, NumberUtils
 
 -- Touch Fling V2 Variables
 local touchFlingEnabled = false
@@ -790,135 +797,340 @@ local function toggleEspBaseTimer(state)
     end
 end
 
--- ==================== ESP TRAP FUNCTION (NEW) ====================
--- Optimized with 6 second scan interval to prevent FPS drops
+-- ==================== AUTO STEAL NEAREST FUNCTION (NEW - REPLACING Instant Grab) ====================
+local function loadAutoStealModules()
+    if ModulesLoaded then return true end
+    local success, err = pcall(function()
+        local Packages = ReplicatedStorage:WaitForChild("Packages")
+        local Datas = ReplicatedStorage:WaitForChild("Datas")
+        local Shared = ReplicatedStorage:WaitForChild("Shared")
+        local Utils = ReplicatedStorage:WaitForChild("Utils")
 
-local function addTrapHighlight(object, name)
-    -- Check if already highlighted
-    if object:FindFirstChild("ESP_Trap_Highlight") then return end
+        Synchronizer = require(Packages:WaitForChild("Synchronizer"))
+        AnimalsData = require(Datas:WaitForChild("Animals"))
+        RaritiesData = require(Datas:WaitForChild("Rarities"))
+        AnimalsShared = require(Shared:WaitForChild("Animals"))
+        NumberUtils = require(Utils:WaitForChild("NumberUtils"))
+    end)
     
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "ESP_Trap_Highlight"
-    highlight.Adornee = object
-    highlight.FillTransparency = 0.5
-    highlight.OutlineTransparency = 0
-    
-    -- Bright red color
-    highlight.FillColor = Color3.fromRGB(255, 0, 0)
-    highlight.OutlineColor = Color3.fromRGB(255, 50, 50)
-    
-    highlight.Parent = object
-    
-    table.insert(espTrapObjects, {Object = object, Highlight = highlight})
-    print("🎯 ESP Trap Added:", name)
+    if success then
+        ModulesLoaded = true
+        print("✅ Auto Steal Modules Loaded")
+    else
+        warn("❌ Failed to load Auto Steal Modules:", err)
+    end
+    return success
 end
 
-local function removeTrapHighlight(object)
-    local highlight = object:FindFirstChild("ESP_Trap_Highlight")
-    if highlight then
-        highlight:Destroy()
-    end
-end
-
--- Find and highlight all targets
-local function findTrapTargets()
-    -- Clear old ESP objects
-    for _, data in pairs(espTrapObjects) do
-        if data.Highlight then
-            data.Highlight:Destroy()
-        end
-    end
-    espTrapObjects = {}
+local function isMyBaseAnimal(animalData)
+    if not animalData or not animalData.plot then return false end
     
-    -- Search workspace for targets
-    for _, obj in pairs(Workspace:GetDescendants()) do
-        if obj:IsA("Model") or obj:IsA("Part") or obj:IsA("MeshPart") then
-            local name = obj.Name:lower()
-            
-            -- Check if it's a Subspace Mine or Trap
-            if name:find("subspace") and name:find("mine") then
-                addTrapHighlight(obj, obj.Name)
-            elseif name:find("trap") then
-                addTrapHighlight(obj, obj.Name)
-            elseif name:find("mine") and not name:find("mining") then
-                addTrapHighlight(obj, obj.Name)
+    local plots = Workspace:FindFirstChild("Plots")
+    if not plots then return false end
+    
+    local plot = plots:FindFirstChild(animalData.plot)
+    if not plot then return false end
+    
+    local channel = Synchronizer:Get(plot.Name)
+    if channel then
+        local owner = channel:Get("Owner")
+        if owner then
+            if typeof(owner) == "Instance" and owner:IsA("Player") then
+                return owner.UserId == player.UserId
+            elseif typeof(owner) == "table" and owner.UserId then
+                return owner.UserId == player.UserId
+            elseif typeof(owner) == "Instance" then
+                return owner == player
             end
         end
     end
     
-    print("✅ Found " .. #espTrapObjects .. " traps")
+    local sign = plot:FindFirstChild("PlotSign")
+    if sign then
+        local yourBase = sign:FindFirstChild("YourBase")
+        if yourBase and yourBase:IsA("BillboardGui") then
+            return yourBase.Enabled == true
+        end
+    end
+    
+    return false
 end
 
--- Start ESP with optimized 6 second scan
-local function startEspTrap()
-    if espTrapEnabled then return end
-    espTrapEnabled = true
+local function findProximityPromptForAnimal(animalData)
+    if not animalData then return nil end
     
-    print("🔍 ESP Trap Started - Scanning every 6 seconds...")
+    local cachedPrompt = PromptMemoryCache[animalData.uid]
+    if cachedPrompt and cachedPrompt.Parent then
+        return cachedPrompt
+    end
     
-    -- Initial scan
-    findTrapTargets()
-    espTrapLastScanTime = tick()
+    local plot = Workspace.Plots:FindFirstChild(animalData.plot)
+    if not plot then return nil end
     
-    -- Optimized continuous monitoring (6 second interval)
-    espTrapConnection = RunService.Heartbeat:Connect(function()
-        if not espTrapEnabled then return end
+    local podiums = plot:FindFirstChild("AnimalPodiums")
+    if not podiums then return nil end
+    
+    local podium = podiums:FindFirstChild(animalData.slot)
+    if not podium then return nil end
+    
+    local base = podium:FindFirstChild("Base")
+    if not base then return nil end
+    
+    local spawn = base:FindFirstChild("Spawn")
+    if not spawn then return nil end
+    
+    local attach = spawn:FindFirstChild("PromptAttachment")
+    if not attach then return nil end
+    
+    for _, p in ipairs(attach:GetChildren()) do
+        if p:IsA("ProximityPrompt") then
+            PromptMemoryCache[animalData.uid] = p
+            return p
+        end
+    end
+    
+    return nil
+end
+
+local function getAnimalPosition(animalData)
+    local plot = Workspace.Plots:FindFirstChild(animalData.plot)
+    if not plot then return nil end
+    
+    local podiums = plot:FindFirstChild("AnimalPodiums")
+    if not podiums then return nil end
+    
+    local podium = podiums:FindFirstChild(animalData.slot)
+    if not podium then return nil end
+    
+    return podium:GetPivot().Position
+end
+
+local function getNearestAnimal()
+    local character = player.Character
+    if not character then return nil end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("UpperTorso")
+    if not hrp then return nil end
+    
+    local nearest = nil
+    local minDist = math.huge
+    
+    for _, animalData in ipairs(allAnimalsCache) do
+        if isMyBaseAnimal(animalData) then
+            continue
+        end
         
-        local currentTime = tick()
-        
-        -- Check for new objects every 6 seconds (performance optimized)
-        if currentTime - espTrapLastScanTime >= 6 then
-            espTrapLastScanTime = currentTime
+        local pos = getAnimalPosition(animalData)
+        if pos then
+            local dist = (hrp.Position - pos).Magnitude
             
-            for _, obj in pairs(Workspace:GetDescendants()) do
-                if obj:IsA("Model") or obj:IsA("Part") or obj:IsA("MeshPart") then
-                    local name = obj.Name:lower()
-                    
-                    if (name:find("subspace") and name:find("mine")) or 
-                       name:find("trap") or 
-                       (name:find("mine") and not name:find("mining")) then
-                        
-                        -- Only add if not already highlighted
-                        if not obj:FindFirstChild("ESP_Trap_Highlight") then
-                            addTrapHighlight(obj, obj.Name)
-                        end
-                    end
-                end
+            if dist < minDist then
+                minDist = dist
+                nearest = animalData
             end
+        end
+    end
+    
+    return nearest
+end
+
+local function buildStealCallbacks(prompt)
+    if InternalStealCache[prompt] then return end
+    
+    local data = {
+        holdCallbacks = {},
+        triggerCallbacks = {},
+        ready = true,
+    }
+    
+    local ok1, conns1 = pcall(getconnections, prompt.PromptButtonHoldBegan)
+    if ok1 and type(conns1) == "table" then
+        for _, conn in ipairs(conns1) do
+            if type(conn.Function) == "function" then
+                table.insert(data.holdCallbacks, conn.Function)
+            end
+        end
+    end
+    
+    local ok2, conns2 = pcall(getconnections, prompt.Triggered)
+    if ok2 and type(conns2) == "table" then
+        for _, conn in ipairs(conns2) do
+            if type(conn.Function) == "function" then
+                table.insert(data.triggerCallbacks, conn.Function)
+            end
+        end
+    end
+    
+    if (#data.holdCallbacks > 0) or (#data.triggerCallbacks > 0) then
+        InternalStealCache[prompt] = data
+    end
+end
+
+local function executeInternalStealAsync(prompt)
+    local data = InternalStealCache[prompt]
+    if not data or not data.ready then return false end
+    
+    data.ready = false
+    
+    task.spawn(function()
+        if #data.holdCallbacks > 0 then
+            for _, fn in ipairs(data.holdCallbacks) do
+                task.spawn(fn)
+            end
+        end
+        
+        task.wait(1.3)
+        
+        if #data.triggerCallbacks > 0 then
+            for _, fn in ipairs(data.triggerCallbacks) do
+                task.spawn(fn)
+            end
+        end
+        
+        task.wait(0.1)
+        data.ready = true
+    end)
+    
+    return true
+end
+
+local function attemptSteal(prompt)
+    if not prompt or not prompt.Parent then
+        return false
+    end
+    
+    buildStealCallbacks(prompt)
+    if not InternalStealCache[prompt] then
+        return false
+    end
+    
+    return executeInternalStealAsync(prompt)
+end
+
+local function scanAllPlots()
+    local plots = Workspace:FindFirstChild("Plots")
+    if not plots then return {} end
+    
+    local newCache = {}
+    
+    for _, plot in ipairs(plots:GetChildren()) do
+        local channel = Synchronizer:Get(plot.Name)
+        if not channel then continue end
+        
+        local animalList = channel:Get("AnimalList")
+        if not animalList then continue end
+        
+        local owner = channel:Get("Owner")
+        if not owner then continue end
+        
+        local ownerName = "Unknown"
+        if typeof(owner) == "Instance" and owner:IsA("Player") then
+            ownerName = owner.Name
+        elseif typeof(owner) == "table" and owner.Name then
+            ownerName = owner.Name
+        end
+        
+        for slot, animalData in pairs(animalList) do
+            if type(animalData) == "table" then
+                local animalName = animalData.Index
+                local animalInfo = AnimalsData[animalName]
+                if not animalInfo then continue end
+                
+                local rarity = animalInfo.Rarity
+                local mutation = animalData.Mutation or "None"
+                local traits = (animalData.Traits and #animalData.Traits > 0) and table.concat(animalData.Traits, ", ") or "None"
+                
+                local genValue = AnimalsShared:GetGeneration(animalName, animalData.Mutation, animalData.Traits, nil)
+                
+                table.insert(newCache, {
+                    name = animalInfo.DisplayName or animalName,
+                    genValue = genValue,
+                    mutation = mutation,
+                    traits = traits,
+                    owner = ownerName,
+                    plot = plot.Name,
+                    slot = tostring(slot),
+                    uid = plot.Name .. "_" .. tostring(slot),
+                })
+            end
+        end
+    end
+    
+    allAnimalsCache = newCache
+    
+    table.sort(allAnimalsCache, function(a, b)
+        return a.genValue > b.genValue
+    end)
+    
+    return #allAnimalsCache
+end
+
+local function startAutoSteal()
+    if autoStealConnection then return end
+    
+    -- Start Scan Loop
+    autoStealScanThread = task.spawn(function()
+        while autoStealEnabled do
+            pcall(scanAllPlots)
+            task.wait(5)
+        end
+    end)
+    
+    -- Start Heartbeat Loop
+    autoStealConnection = RunService.Heartbeat:Connect(function()
+        if not autoStealEnabled then return end
+        
+        local targetAnimal = getNearestAnimal()
+        if not targetAnimal then return end
+        
+        local character = player.Character
+        if not character then return end
+        
+        local hrp = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("UpperTorso")
+        if not hrp then return end
+        
+        local animalPos = getAnimalPosition(targetAnimal)
+        if not animalPos then return end
+        
+        local dist = (hrp.Position - animalPos).Magnitude
+        if dist > 20 then return end -- Default Radius 20
+        
+        local prompt = PromptMemoryCache[targetAnimal.uid]
+        if not prompt or not prompt.Parent then
+            prompt = findProximityPromptForAnimal(targetAnimal)
+        end
+        
+        if prompt then
+            attemptSteal(prompt)
         end
     end)
 end
 
--- Stop ESP and clean up
-local function stopEspTrap()
-    espTrapEnabled = false
-    
-    if espTrapConnection then
-        espTrapConnection:Disconnect()
-        espTrapConnection = nil
+local function stopAutoSteal()
+    if autoStealConnection then
+        autoStealConnection:Disconnect()
+        autoStealConnection = nil
     end
-    
-    -- Remove all highlights
-    for _, data in pairs(espTrapObjects) do
-        if data.Highlight then
-            data.Highlight:Destroy()
-        end
+    if autoStealScanThread then
+        task.cancel(autoStealScanThread)
+        autoStealScanThread = nil
     end
-    espTrapObjects = {}
-    
-    -- Clean up any remaining highlights in workspace
-    for _, obj in pairs(Workspace:GetDescendants()) do
-        removeTrapHighlight(obj)
-    end
-    
-    print("🛑 ESP Trap Stopped")
 end
 
-local function toggleEspTrap(state)
+local function toggleAutoStealNearest(state)
+    autoStealEnabled = state
+    
+    if not loadAutoStealModules() then
+        warn("❌ Failed to load modules for Auto Steal!")
+        return
+    end
+    
     if state then
-        startEspTrap()
+        startAutoSteal()
+        print("✅ Auto Steal Nearest: ON")
     else
-        stopEspTrap()
+        stopAutoSteal()
+        print("❌ Auto Steal Nearest: OFF")
     end
 end
 
@@ -1168,145 +1380,6 @@ local function toggleAutoKickAfterSteal(state)
     if state then startMonitoring(); print("✅ Auto Kick After Steal: ON") else stopMonitoring(); print("❌ Auto Kick After Steal: OFF") end
 end
 
--- ==================== INSTANT GRAB FUNCTION (FIXED) ====================
-local function getPromptPosition(prompt)
-    local parent = prompt.Parent
-    
-    if parent:IsA("BasePart") then
-        return parent.Position
-    end
-    
-    if parent:IsA("Model") then
-        local primary = parent.PrimaryPart or parent:FindFirstChildWhichIsA("BasePart")
-        if primary then
-            return primary.Position
-        end
-    end
-    
-    if parent:IsA("Attachment") then
-        return parent.WorldPosition
-    end
-    
-    return nil
-end
-
--- Extended range untuk detect objek atas/bawah
-local DETECTION_RANGE = 50  -- Increase range untuk detect lebih jauh
-
-local function findNearestPrompt()
-    local character = player.Character
-    if not character then return nil, math.huge end
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil, math.huge end
-    
-    local nearest = nil
-    local minDist = math.huge
-    local plots = workspace:FindFirstChild("Plots")
-    
-    if not plots then return nil, math.huge end
-    
-    for _, obj in pairs(plots:GetDescendants()) do
-        if obj:IsA("ProximityPrompt") and obj.Enabled and obj.ActionText == "Steal" then
-            local pos = getPromptPosition(obj)
-            
-            if pos then
-                -- Calculate 3D distance (termasuk Y axis untuk objek atas/bawah)
-                local dist = (hrp.Position - pos).Magnitude
-                
-                -- Check dalam detection range kita
-                if dist <= DETECTION_RANGE and dist < minDist then
-                    minDist = dist
-                    nearest = obj
-                end
-            end
-        end
-    end
-    
-    return nearest, minDist
-end
-
-local function activatePrompt(prompt)
-    local originalMaxDist = prompt.MaxActivationDistance
-    
-    -- Temporarily extend range
-    prompt.MaxActivationDistance = 100  -- Extend range sementara
-    
-    -- Activate dengan range yang dipanjangkan
-    task.wait(0.05)
-    fireproximityprompt(prompt, 0)  -- Distance parameter 0
-    
-    -- Hold prompt
-    prompt:InputHoldBegin()
-    task.wait(0.1)
-    prompt:InputHoldEnd()
-    
-    task.wait(0.1)
-    
-    -- Restore original range
-    prompt.MaxActivationDistance = originalMaxDist
-end
-
-local function startInstantGrab()
-    if instantGrabEnabled then return end
-    instantGrabEnabled = true
-    print("✅ Instant Grab: ON")
-    
-    instantGrabThread = task.spawn(function()
-        local currentPrompt = nil
-        local currentDistance = math.huge
-        local lastUpdate = 0
-        local isActivating = false
-        
-        RunService.Heartbeat:Connect(function()
-            local now = tick()
-            -- *** FIX: Reduced update frequency to improve performance ***
-            if now - lastUpdate >= 0.25 then -- Changed from 0.05 to 0.25
-                currentPrompt, currentDistance = findNearestPrompt()
-                lastUpdate = now
-            end
-        end)
-        
-        while instantGrabEnabled do
-            local character = player.Character
-            if character then
-                local humanoid = character:FindFirstChildOfClass("Humanoid")
-                if humanoid and humanoid.WalkSpeed > 25 and not isActivating then
-                    if currentPrompt and currentDistance <= DETECTION_RANGE then
-                        isActivating = true
-                        activatePrompt(currentPrompt)
-                        task.wait(1.5)
-                        isActivating = false
-                    else
-                        task.wait(0.1)
-                    end
-                else
-                    task.wait(0.5)
-                end
-            else
-                task.wait(1)
-            end
-        end
-    end)
-end
-
-local function stopInstantGrab()
-    if not instantGrabEnabled then return end
-    instantGrabEnabled = false
-    print("❌ Instant Grab: OFF")
-    if instantGrabThread then
-        task.cancel(instantGrabThread)
-        instantGrabThread = nil
-    end
-end
-
-local function toggleInstantGrab(state)
-    if state then
-        startInstantGrab()
-    else
-        stopInstantGrab()
-    end
-end
-
 -- ==================== TOUCH FLING V2 FUNCTION ====================
 local function enableTouchFling()
     pcall(function() local character = player.Character; if character then local humanoid = character:FindFirstChildWhichIsA("Humanoid"); if humanoid and humanoid.AutoJumpEnabled ~= nil then humanoid.AutoJumpEnabled = false end end end)
@@ -1465,6 +1538,138 @@ end
 Players.PlayerAdded:Connect(function(p) p.CharacterAdded:Connect(function(character) task.wait(1); if espPlayersEnabled and p ~= player then createESP(p) end end) end)
 Players.PlayerRemoving:Connect(function(p) removeESP(p) end)
 for _, p in pairs(Players:GetPlayers()) do if p ~= player then p.CharacterAdded:Connect(function(character) task.wait(1); if espPlayersEnabled then createESP(p) end end) end end
+
+-- ==================== ESP TRAP FUNCTION (NEW) ====================
+-- Optimized with 6 second scan interval to prevent FPS drops
+
+local function addTrapHighlight(object, name)
+    -- Check if already highlighted
+    if object:FindFirstChild("ESP_Trap_Highlight") then return end
+    
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "ESP_Trap_Highlight"
+    highlight.Adornee = object
+    highlight.FillTransparency = 0.5
+    highlight.OutlineTransparency = 0
+    
+    -- Bright red color
+    highlight.FillColor = Color3.fromRGB(255, 0, 0)
+    highlight.OutlineColor = Color3.fromRGB(255, 50, 50)
+    
+    highlight.Parent = object
+    
+    table.insert(espTrapObjects, {Object = object, Highlight = highlight})
+    print("🎯 ESP Trap Added:", name)
+end
+
+local function removeTrapHighlight(object)
+    local highlight = object:FindFirstChild("ESP_Trap_Highlight")
+    if highlight then
+        highlight:Destroy()
+    end
+end
+
+-- Find and highlight all targets
+local function findTrapTargets()
+    -- Clear old ESP objects
+    for _, data in pairs(espTrapObjects) do
+        if data.Highlight then
+            data.Highlight:Destroy()
+        end
+    end
+    espTrapObjects = {}
+    
+    -- Search workspace for targets
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") or obj:IsA("Part") or obj:IsA("MeshPart") then
+            local name = obj.Name:lower()
+            
+            -- Check if it's a Subspace Mine or Trap
+            if name:find("subspace") and name:find("mine") then
+                addTrapHighlight(obj, obj.Name)
+            elseif name:find("trap") then
+                addTrapHighlight(obj, obj.Name)
+            elseif name:find("mine") and not name:find("mining") then
+                addTrapHighlight(obj, obj.Name)
+            end
+        end
+    end
+    
+    print("✅ Found " .. #espTrapObjects .. " traps")
+end
+
+-- Start ESP with optimized 6 second scan
+local function startEspTrap()
+    if espTrapEnabled then return end
+    espTrapEnabled = true
+    
+    print("🔍 ESP Trap Started - Scanning every 6 seconds...")
+    
+    -- Initial scan
+    findTrapTargets()
+    espTrapLastScanTime = tick()
+    
+    -- Optimized continuous monitoring (6 second interval)
+    espTrapConnection = RunService.Heartbeat:Connect(function()
+        if not espTrapEnabled then return end
+        
+        local currentTime = tick()
+        
+        -- Check for new objects every 6 seconds (performance optimized)
+        if currentTime - espTrapLastScanTime >= 6 then
+            espTrapLastScanTime = currentTime
+            
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("Model") or obj:IsA("Part") or obj:IsA("MeshPart") then
+                    local name = obj.Name:lower()
+                    
+                    if (name:find("subspace") and name:find("mine")) or 
+                       name:find("trap") or 
+                       (name:find("mine") and not name:find("mining")) then
+                        
+                        -- Only add if not already highlighted
+                        if not obj:FindFirstChild("ESP_Trap_Highlight") then
+                            addTrapHighlight(obj, obj.Name)
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+-- Stop ESP and clean up
+local function stopEspTrap()
+    espTrapEnabled = false
+    
+    if espTrapConnection then
+        espTrapConnection:Disconnect()
+        espTrapConnection = nil
+    end
+    
+    -- Remove all highlights
+    for _, data in pairs(espTrapObjects) do
+        if data.Highlight then
+            data.Highlight:Destroy()
+        end
+    end
+    espTrapObjects = {}
+    
+    -- Clean up any remaining highlights in workspace
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        removeTrapHighlight(obj)
+    end
+    
+    print("🛑 ESP Trap Stopped")
+end
+
+local function toggleEspTrap(state)
+    if state then
+        startEspTrap()
+    else
+        stopEspTrap()
+    end
+end
 
 -- ==================== LASER CAPE (AIMBOT) FUNCTION ====================
 local blacklistNames = {"alex4eva", "jkxkelu", "BigTulaH", "xxxdedmoth", "JokiTablet", "sleepkola", "Aimbot36022", "Djrjdjdk0", "elsodidudujd", "SENSEIIIlSALT", "yaniecky", "ISAAC_EVO", "7xc_ls", "itz_d1egx"}
@@ -1883,7 +2088,7 @@ NightmareHub:AddMainToggle("Websling Kill", function(state) toggleWebslingKill(s
 NightmareHub:AddMainToggle("Baselock Reminder", function(state) toggleBaselockReminder(state) end)
 NightmareHub:AddMainToggle("Websling Control", function(state) toggleWebslingControl(state) end)
 NightmareHub:AddMainToggle("Admin Panel Spammer", function(state) toggleAdminPanelSpammer(state) end) -- CHANGED
-NightmareHub:AddMainToggle("Instant Grab", function(state) toggleInstantGrab(state) end)
+NightmareHub:AddMainToggle("Auto Steal Nearest", function(state) toggleAutoStealNearest(state) end) -- NEW NAME (REPLACED Instant Grab)
 -- Auto Destroy Sentry removed here
 
 -- VISUAL TAB
