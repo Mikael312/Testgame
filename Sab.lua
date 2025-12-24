@@ -13,7 +13,7 @@
     - [UPDATED] Base Line now targets the "PlotSign" in the player's plot.
     - [ADDED] "Unwalk Anim" toggle to the Misc tab.
     - [ADDED] "God Mode" toggle to the Misc tab.
-    - [ADDED] "Auto Destroy Sentry" (External Load) to Main tab.
+    - [REMOVED] "Esp Turret" and "Auto Destroy Sentry".
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -117,11 +117,6 @@ local updateConnection = nil
 -- Laser Cape (Aimbot) Variables
 local autoLaserEnabled = false
 local autoLaserThread = nil
-
--- ESP Turret Variables
-local sentryESPEnabled = false
-local trackedSentries = {}
-local scanConnection = nil
 
 -- Base Line Variables
 local baseLineEnabled = false
@@ -1372,46 +1367,6 @@ local function toggleAutoLaser(enabled)
     else if autoLaserThread then task.cancel(autoLaserThread); autoLaserThread = nil end; print("✗ Laser Cape (Aimbot): OFF") end
 end
 
--- ==================== ESP TURRET (SENTRY) FUNCTION ====================
-local function getPlayerNameFromSentry(sentryName)
-    local userId = sentryName:match("Sentry_(%d+)"); if userId then for _, p in ipairs(Players:GetPlayers()) do if tostring(p.UserId) == userId then return p.Name end end; return "Player " .. userId end; return "Unknown"
-end
-
-local function createSentryESP(sentry)
-    if sentry:FindFirstChild("SentryESP_Highlight") then sentry.SentryESP_Highlight:Destroy() end
-    local highlight = Instance.new("Highlight"); highlight.Name = "SentryESP_Highlight"; highlight.Adornee = sentry; highlight.FillColor = Color3.fromRGB(0, 255, 255); highlight.OutlineColor = Color3.fromRGB(0, 255, 255); highlight.FillTransparency = 0.6; highlight.OutlineTransparency = 0; highlight.Parent = sentry
-end
-
-local function removeSentryESP(sentry) if sentry:FindFirstChild("SentryESP_Highlight") then sentry.SentryESP_Highlight:Destroy() end end
-
-local function scanForSentries()
-    local found = {}
-    for _, obj in ipairs(Workspace:GetChildren()) do
-        if obj.Name:match("^Sentry_%d+") then found[obj] = true; if not trackedSentries[obj] then trackedSentries[obj] = true; local ownerName = getPlayerNameFromSentry(obj.Name); print("NEW SENTRY DETECTED:", ownerName); if sentryESPEnabled then createSentryESP(obj) end end end
-    end
-    for sentry, _ in pairs(trackedSentries) do if not sentry.Parent or not found[sentry] then trackedSentries[sentry] = nil; removeSentryESP(sentry) end end
-end
-
-local function enableSentryESP()
-    if sentryESPEnabled then return end
-    sentryESPEnabled = true; for sentry, _ in pairs(trackedSentries) do if sentry.Parent then createSentryESP(sentry) end end
-    if not scanConnection then scanConnection = RunService.Heartbeat:Connect(function() if sentryESPEnabled then pcall(scanForSentries) end end) end; print("✅ Sentry ESP Enabled")
-end
-
-local function disableSentryESP()
-    if not sentryESPEnabled then return end
-    sentryESPEnabled = false; for sentry, _ in pairs(trackedSentries) do removeSentryESP(sentry) end; if scanConnection then scanConnection:Disconnect(); scanConnection = nil end; print("❌ Sentry ESP Disabled")
-end
-
-local function toggleSentryESP(state)
-    if state then enableSentryESP() else disableSentryESP() end
-end
-
-Workspace.ChildAdded:Connect(function(child)
-    task.wait(0.1); if child.Name:match("^Sentry_%d+") then local ownerName = getPlayerNameFromSentry(child.Name); print("NEW SENTRY PLACED:", ownerName); task.wait(0.5); trackedSentries[child] = true; if sentryESPEnabled then createSentryESP(child); scanForSentries() end end
-end)
-task.wait(1); scanForSentries()
-
 -- ==================== BASE LINE FUNCTION (UPDATED - TARGETS PLOT SIGN) ====================
 local function findPlayerPlot()
     local plots = workspace:FindFirstChild("Plots")
@@ -1774,18 +1729,6 @@ local function toggleSilentHit(state)
     if state then pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Silenthit.lua"))() end); print("✅ Silent Hit: ON") else print("❌ Silent Hit: OFF") end
 end
 
--- ==================== AUTO DESTROY SENTRY FUNCTION (EXTERNAL LOAD - SIMPLIFIED) ====================
-local function toggleAutoDestroySentry(state)
-    if state then
-        pcall(function()
-            loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/DestroyTurret.lua"))()
-        end)
-        print("✅ Auto Destroy Sentry: Loaded")
-    else
-        print("❌ Auto Destroy Sentry: OFF (Script runs externally)")
-    end
-end
-
 -- ==================== CREATE UI AND ADD TOGGLES ====================
 NightmareHub:CreateUI()
 
@@ -1802,14 +1745,14 @@ NightmareHub:AddMainToggle("Baselock Reminder", function(state) toggleBaselockRe
 NightmareHub:AddMainToggle("Websling Control", function(state) toggleWebslingControl(state) end)
 NightmareHub:AddMainToggle("Admin Panel Spammer", function(state) toggleAdminPanelSpammer(state) end) -- CHANGED
 NightmareHub:AddMainToggle("Instant Grab", function(state) toggleInstantGrab(state) end)
-NightmareHub:AddMainToggle("Auto Destroy Sentry", function(state) toggleAutoDestroySentry(state) end) -- NEW (EXTERNAL)
+-- Auto Destroy Sentry removed here
 
 -- VISUAL TAB
 NightmareHub:AddVisualToggle("Esp Players", function(state) toggleESPPlayers(state) end)
 NightmareHub:AddVisualToggle("Esp Best", function(state) toggleEspBest(state) end) -- CHANGED from "Esp Best"
 NightmareHub:AddVisualToggle("Esp Base Timer", function(state) toggleEspBaseTimer(state) end)
 NightmareHub:AddVisualToggle("Base Line", function(state) toggleBaseLine(state) end)
-NightmareHub:AddVisualToggle("Esp Turret", function(state) toggleSentryESP(state) end)
+-- Esp Turret removed here
 
 -- MISC TAB
 NightmareHub:AddMiscToggle("Anti Debuff", function(state) toggleAntiDebuff(state) end)
