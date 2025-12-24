@@ -14,7 +14,6 @@
     - [ADDED] "Unwalk Anim" toggle to the Misc tab.
     - [ADDED] "God Mode" toggle to the Misc tab.
     - [ADDED] "Auto Destroy Sentry" (External Load) to Main tab.
-    - [REMOVED] "Esp Turret" function and toggle.
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -119,6 +118,11 @@ local updateConnection = nil
 local autoLaserEnabled = false
 local autoLaserThread = nil
 
+-- ESP Turret Variables
+local sentryESPEnabled = false
+local trackedSentries = {}
+local scanConnection = nil
+
 -- Base Line Variables
 local baseLineEnabled = false
 local baseLineConnection = nil
@@ -157,7 +161,7 @@ local function createPlatform()
     
     platformPart = Instance.new("Part")
     platformPart.Name = "NightmareHubPlatform"
-    platformPart.Size = Vector3.new(10,1, 10)
+    platformPart.Size = Vector3.new(10, 1, 10)
     platformPart.Anchored = true
     platformPart.CanCollide = true
     platformPart.Transparency = 0.5
@@ -341,7 +345,7 @@ end
 local function formatNumber(num)
     local value, suffix
     
-    if num >=1e12 then
+    if num >= 1e12 then
         value = num / 1e12
         suffix = "T/s"
     elseif num >= 1e9 then
@@ -1122,7 +1126,7 @@ local function startInstantGrab()
         RunService.Heartbeat:Connect(function()
             local now = tick()
             -- *** FIX: Reduced update frequency to improve performance ***
-            if now - lastUpdate >=0.25 then -- Changed from 0.05 to 0.25
+            if now - lastUpdate >= 0.25 then -- Changed from 0.05 to 0.25
                 currentPrompt, currentDistance = findNearestPrompt()
                 lastUpdate = now
             end
@@ -1288,7 +1292,7 @@ local function getEquippedItem(character) local tool = character:FindFirstChildO
 
 local function createESP(targetPlayer)
     if targetPlayer == player then return end; local character = targetPlayer.Character; if not character then return end; local rootPart = character:FindFirstChild("HumanoidRootPart"); if not rootPart then return end
-    local highlight = Instance.new("Highlight"); highlight.Name = "PlayerESP"; highlight.Adornee = character; highlight.FillColor = Color3.fromRGB(0, 255, 255); highlight.OutlineColor = Color3.fromRGB(0, 200, 255); highlight.FillTransparency = 0.5; highlight.OutlineTransparency = 0; highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop; highlight.Parent = character
+    local highlight = Instance.new("Highlight"); highlight.Name = "PlayerESP"; highlight.Adornee = character; highlight.FillColor = Color3.fromRGB(0,255,255); highlight.OutlineColor = Color3.fromRGB(0, 200, 255); highlight.FillTransparency = 0.5; highlight.OutlineTransparency = 0; highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop; highlight.Parent = character
     local billboard = Instance.new("BillboardGui"); billboard.Name = "ESPInfo"; billboard.Adornee = rootPart; billboard.Size = UDim2.new(0, 200, 0, 40); billboard.StudsOffset = Vector3.new(0, 3, 0); billboard.AlwaysOnTop = true; billboard.Parent = character
     local nameLabel = Instance.new("TextLabel"); nameLabel.Size = UDim2.new(1, 0, 0, 20); nameLabel.BackgroundTransparency = 1; nameLabel.Text = targetPlayer.Name; nameLabel.TextColor3 = Color3.fromRGB(0, 255, 255); nameLabel.TextStrokeTransparency = 0.5; nameLabel.TextStrokeColor3 = Color3.new(0, 0, 0); nameLabel.Font = Enum.Font.GothamBold; nameLabel.TextSize = 14; nameLabel.Parent = billboard
     local itemLabel = Instance.new("TextLabel"); itemLabel.Size = UDim2.new(1, 0, 0, 18); itemLabel.Position = UDim2.new(0, 0, 0, 22); itemLabel.BackgroundTransparency = 1; itemLabel.Text = "Item: None"; itemLabel.TextColor3 = Color3.fromRGB(255, 255, 100); itemLabel.TextStrokeTransparency = 0.5; itemLabel.TextStrokeColor3 = Color3.new(0, 0, 0); itemLabel.Font = Enum.Font.Gotham; itemLabel.TextSize = 12; itemLabel.Parent = billboard
@@ -1367,6 +1371,46 @@ local function toggleAutoLaser(enabled)
     if autoLaserEnabled then if autoLaserThread then task.cancel(autoLaserThread) end; autoLaserThread = task.spawn(autoLaserWorker); print("✓ Laser Cape (Aimbot): ON")
     else if autoLaserThread then task.cancel(autoLaserThread); autoLaserThread = nil end; print("✗ Laser Cape (Aimbot): OFF") end
 end
+
+-- ==================== ESP TURRET (SENTRY) FUNCTION ====================
+local function getPlayerNameFromSentry(sentryName)
+    local userId = sentryName:match("Sentry_(%d+)"); if userId then for _, p in ipairs(Players:GetPlayers()) do if tostring(p.UserId) == userId then return p.Name end end; return "Player " .. userId end; return "Unknown"
+end
+
+local function createSentryESP(sentry)
+    if sentry:FindFirstChild("SentryESP_Highlight") then sentry.SentryESP_Highlight:Destroy() end
+    local highlight = Instance.new("Highlight"); highlight.Name = "SentryESP_Highlight"; highlight.Adornee = sentry; highlight.FillColor = Color3.fromRGB(0, 255, 255); highlight.OutlineColor = Color3.fromRGB(0, 255, 255); highlight.FillTransparency = 0.6; highlight.OutlineTransparency = 0; highlight.Parent = sentry
+end
+
+local function removeSentryESP(sentry) if sentry:FindFirstChild("SentryESP_Highlight") then sentry.SentryESP_Highlight:Destroy() end end
+
+local function scanForSentries()
+    local found = {}
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj.Name:match("^Sentry_%d+") then found[obj] = true; if not trackedSentries[obj] then trackedSentries[obj] = true; local ownerName = getPlayerNameFromSentry(obj.Name); print("NEW SENTRY DETECTED:", ownerName); if sentryESPEnabled then createSentryESP(obj) end end end
+    end
+    for sentry, _ in pairs(trackedSentries) do if not sentry.Parent or not found[sentry] then trackedSentries[sentry] = nil; removeSentryESP(sentry) end end
+end
+
+local function enableSentryESP()
+    if sentryESPEnabled then return end
+    sentryESPEnabled = true; for sentry, _ in pairs(trackedSentries) do if sentry.Parent then createSentryESP(sentry) end end
+    if not scanConnection then scanConnection = RunService.Heartbeat:Connect(function() if sentryESPEnabled then pcall(scanForSentries) end end) end; print("✅ Sentry ESP Enabled")
+end
+
+local function disableSentryESP()
+    if not sentryESPEnabled then return end
+    sentryESPEnabled = false; for sentry, _ in pairs(trackedSentries) do removeSentryESP(sentry) end; if scanConnection then scanConnection:Disconnect(); scanConnection = nil end; print("❌ Sentry ESP Disabled")
+end
+
+local function toggleSentryESP(state)
+    if state then enableSentryESP() else disableSentryESP() end
+end
+
+Workspace.ChildAdded:Connect(function(child)
+    task.wait(0.1); if child.Name:match("^Sentry_%d+") then local ownerName = getPlayerNameFromSentry(child.Name); print("NEW SENTRY PLACED:", ownerName); task.wait(0.5); trackedSentries[child] = true; if sentryESPEnabled then createSentryESP(child); scanForSentries() end end
+end)
+task.wait(1); scanForSentries()
 
 -- ==================== BASE LINE FUNCTION (UPDATED - TARGETS PLOT SIGN) ====================
 local function findPlayerPlot()
@@ -1765,7 +1809,7 @@ NightmareHub:AddVisualToggle("Esp Players", function(state) toggleESPPlayers(sta
 NightmareHub:AddVisualToggle("Esp Best", function(state) toggleEspBest(state) end) -- CHANGED from "Esp Best"
 NightmareHub:AddVisualToggle("Esp Base Timer", function(state) toggleEspBaseTimer(state) end)
 NightmareHub:AddVisualToggle("Base Line", function(state) toggleBaseLine(state) end)
--- Esp Turret removed here
+NightmareHub:AddVisualToggle("Esp Turret", function(state) toggleSentryESP(state) end)
 
 -- MISC TAB
 NightmareHub:AddMiscToggle("Anti Debuff", function(state) toggleAntiDebuff(state) end)
