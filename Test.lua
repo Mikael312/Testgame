@@ -134,7 +134,7 @@ pcall(function()
     NumberUtils = require(Utils:WaitForChild("NumberUtils"))
 end)
 
--- ==================== ESP PLAYERS FUNCTIONS ====================
+-- ==================== ESP PLAYERS FUNCTIONS (FIXED) ====================
 local function getEquippedItem(character)
     local tool = character:FindFirstChildOfClass("Tool")
     if tool then
@@ -145,6 +145,9 @@ end
 
 local function createESP(targetPlayer)
     if targetPlayer == player then return end
+    
+    -- Buang ESP lama jika ada, untuk mengelakkan duplikasi semasa respawn
+    removeESP(targetPlayer)
     
     local character = targetPlayer.Character
     if not character then return end
@@ -213,14 +216,32 @@ local function removeESP(targetPlayer)
     end
 end
 
+-- **GUNAKAN FUNGSI updateESP YANG BARU INI**
 local function updateESP()
     if not espPlayersEnabled then return end
     
     for p, espData in pairs(espObjects) do
-        if p and p.Parent and espData.character and espData.character.Parent then
-            local character = espData.character
+        -- Sentiasa dapatkan watak TERKINI, bukan yang disimpan
+        local character = p.Character
+        
+        if character and character.Parent then
             local rootPart = character:FindFirstChild("HumanoidRootPart")
             if rootPart then
+                -- Pastikan ESP dihidupkan dan dikemas kini
+                espData.highlight.Enabled = true
+                espData.billboard.Enabled = true
+
+                -- **KEMAS KINI ADORNEE (PENTING UNTUK RESPAWN)**
+                -- Ini memastikan highlight dan billboard sentiasa merujuk kepada watak yang betul
+                if espData.highlight.Adornee ~= character then
+                    espData.highlight.Adornee = character
+                end
+                if espData.billboard.Adornee ~= rootPart then
+                    espData.billboard.Adornee = rootPart
+                end
+                
+                -- Kemas kini nama dan item
+                espData.billboard.Frame.TextLabel.Text = p.Name -- Update name in case of display name change
                 local equippedItem = getEquippedItem(character)
                 espData.itemLabel.Text = "Item: " .. equippedItem
                 if equippedItem ~= "None" then
@@ -229,10 +250,14 @@ local function updateESP()
                     espData.itemLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
                 end
             else
-                removeESP(p)
+                -- Watak wujud tetapi tiada HumanoidRootPart (sedang respawn), sembunyikan ESP sementara
+                espData.highlight.Enabled = false
+                espData.billboard.Enabled = false
             end
         else
-            removeESP(p)
+            -- Pemain tiada watak (telah mati), sembunyikan ESP sementara
+            if espData.highlight then espData.highlight.Enabled = false end
+            if espData.billboard then espData.billboard.Enabled = false end
         end
     end
 end
@@ -241,13 +266,16 @@ local function enableESPPlayers()
     if espPlayersEnabled then return end
     espPlayersEnabled = true
     
+    -- Pengendali acara (PlayerAdded/Removing) akan mengendalikan penciptaan ESP
+    -- Jadi kita hanya perlu memanggil watchPlayer untuk pemain sedia ada
     for _, p in pairs(Players:GetPlayers()) do
-        if p ~= player and p.Character then
-            createESP(p)
-        end
+        watchPlayer(p)
     end
     
+    -- Mula gelung kemas kini
+    if updateConnection then updateConnection:Disconnect() end
     updateConnection = RunService.RenderStepped:Connect(updateESP)
+    
     print("✅ ESP Players Enabled")
 end
 
@@ -2516,16 +2544,39 @@ local function toggleFpsBoost(state)
     end
 end
 
--- ==================== PLAYER EVENT HANDLERS ====================
-Players.PlayerAdded:Connect(function(p)
+-- ==================== PLAYER EVENT HANDLERS (FIXED) ====================
+-- Fungsi untuk mula memantau seorang pemain
+local function watchPlayer(p)
+    if p == player then return end
+    
+    -- Cipta ESP jika watak sudah wujud
+    if p.Character then
+        task.spawn(function()
+            task.wait(0.5) -- Beri sedikit masa untuk watak dimuatkan sepenuhnya
+            if espPlayersEnabled then
+                createESP(p)
+            end
+        end)
+    end
+    
+    -- Sambung acara untuk mencipta ESP apabila pemain respawn
     p.CharacterAdded:Connect(function(character)
-        task.wait(1)
-        if espPlayersEnabled and p ~= player then
+        if espPlayersEnabled then
+            task.wait(0.5) -- Tunggu HumanoidRootPart wujud
             createESP(p)
         end
     end)
-end)
+end
 
+-- Mula memantau semua pemain yang ada dalam game
+for _, p in pairs(Players:GetPlayers()) do
+    watchPlayer(p)
+end
+
+-- Mula memantau pemain baharu yang join
+Players.PlayerAdded:Connect(watchPlayer)
+
+-- Hapus ESP apabila pemain keluar
 Players.PlayerRemoving:Connect(function(p)
     removeESP(p)
 end)
@@ -2617,7 +2668,7 @@ end)
 ArcadeUILib:CreateUI()
 
 -- Notifikasi apabila UI dimuatkan
-ArcadeUILib:Notify("Nightmare Hub")
+ArcadeUILib:Notify("Arcade UI Berjaya Dimuatkan!")
 
 -- Tambah toggle dalam baris yang sama
 ArcadeUILib:AddToggleRow("Esp Players", toggleEspPlayers, "Esp Best", toggleEspBest)
