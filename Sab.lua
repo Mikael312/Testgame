@@ -134,7 +134,7 @@ pcall(function()
     NumberUtils = require(Utils:WaitForChild("NumberUtils"))
 end)
 
--- ==================== ESP PLAYERS FUNCTIONS ====================
+-- ==================== ESP PLAYERS FUNCTIONS (FIXED) ====================
 local function getEquippedItem(character)
     local tool = character:FindFirstChildOfClass("Tool")
     if tool then
@@ -144,6 +144,11 @@ local function getEquippedItem(character)
 end
 
 local function createESP(targetPlayer)
+    -- FIX: Remove existing ESP for this player to prevent duplicates
+    if espObjects[targetPlayer] then
+        removeESP(targetPlayer)
+    end
+
     if targetPlayer == player then return end
     
     local character = targetPlayer.Character
@@ -237,17 +242,41 @@ local function updateESP()
     end
 end
 
+local function onPlayerAdded(p)
+    -- Don't create ESP for the local player
+    if p == player then return end
+
+    local function onCharacterAdded(character)
+        task.wait(1) -- Wait for character to fully load
+        if espPlayersEnabled then
+            createESP(p)
+        end
+    end
+
+    -- Connect to future character respawns
+    p.CharacterAdded:Connect(onCharacterAdded)
+
+    -- If character already exists, create ESP for it
+    if p.Character then
+        onCharacterAdded(p.Character)
+    end
+end
+
 local function enableESPPlayers()
     if espPlayersEnabled then return end
     espPlayersEnabled = true
     
+    -- Setup ESP for all players currently in the game
     for _, p in pairs(Players:GetPlayers()) do
-        if p ~= player and p.Character then
-            createESP(p)
-        end
+        onPlayerAdded(p)
     end
     
+    -- Start the update loop
+    if updateConnection then
+        updateConnection:Disconnect()
+    end
     updateConnection = RunService.RenderStepped:Connect(updateESP)
+    
     print("✅ ESP Players Enabled")
 end
 
@@ -255,14 +284,17 @@ local function disableESPPlayers()
     if not espPlayersEnabled then return end
     espPlayersEnabled = false
     
+    -- Remove ESP from all players
     for p, _ in pairs(espObjects) do
         removeESP(p)
     end
     
+    -- Stop the update loop
     if updateConnection then
         updateConnection:Disconnect()
         updateConnection = nil
     end
+    
     print("❌ ESP Players Disabled")
 end
 
@@ -2540,15 +2572,10 @@ local function toggleFpsBoost(state)
 end
 
 -- ==================== PLAYER EVENT HANDLERS ====================
-Players.PlayerAdded:Connect(function(p)
-    p.CharacterAdded:Connect(function(character)
-        task.wait(1)
-        if espPlayersEnabled and p ~= player then
-            createESP(p)
-        end
-    end)
-end)
+-- This will handle new players joining the game
+Players.PlayerAdded:Connect(onPlayerAdded)
 
+-- This will handle players leaving the game
 Players.PlayerRemoving:Connect(function(p)
     removeESP(p)
 end)
@@ -2556,13 +2583,7 @@ end)
 -- Sambungan event untuk memuat semula garis jika watak respawn
 player.CharacterAdded:Connect(function(newCharacter)
     task.wait(1)
-    if espPlayersEnabled then
-        for _, p in pairs(Players:GetPlayers()) do
-            if p ~= player and p.Character then
-                createESP(p)
-            end
-        end
-    end
+    -- ESP Players is now handled by the onPlayerAdded system, no need to re-create here.
     
     if espBestEnabled then
         updateHighestValueESP()
