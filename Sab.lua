@@ -1,5 +1,5 @@
 --[[
-    ARCADE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI KB, XRAY BASE & FPS BOOST
+    ARCADE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI RDOLL, XRAY BASE & FPS BOOST
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -90,12 +90,10 @@ local heartbeatConnection = nil
 local animationPlayedConnection = nil
 local BOOGIE_ANIMATION_ID = "109061983885712"
 
--- ==================== ANTI KB VARIABLES ====================
-local antiKnockbackEnabled = false
-local antiKnockbackConn = nil
-local lastSafeVelocity = Vector3.new(0, 0, 0)
-local VELOCITY_THRESHOLD = 35
-local UPDATE_INTERVAL = 0.016
+-- ==================== ANTI RAGDOLL VARIABLES ====================
+local antiRagdollActive = false
+local ragdollConnections = {}
+local cachedCharData = {}
 
 -- ==================== XRAY BASE VARIABLES ====================
 local xrayBaseEnabled = false
@@ -1953,111 +1951,222 @@ local function toggleAntiDebuff(state)
     end
 end
 
--- ==================== ANTI KB FUNCTIONS ====================
-local function startNoKnockback()
-    local char = player.Character
-    if not char then return end
-    
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    
-    if not (hrp and hum) then return end
+-- ============================================================
+-- ANTI-RAGDOLL V2 (MOVEABLE) - STANDALONE
+-- ============================================================
 
-    -- Jika sambungan lama ada, putuskan dahulu
-    if antiKnockbackConn then
-        antiKnockbackConn:Disconnect()
+local ANTI_RAGDOLL = {}
+
+-- ============================================================
+-- HELPER FUNCTIONS
+-- ============================================================
+
+local function getHRP()
+    local char = player.Character
+    if not char then return nil end
+    return char:FindFirstChild("HumanoidRootPart")
+end
+
+-- Cache character data for performance
+local function cacheCharacterData()
+    local char = player.Character
+    if not char then return false end
+    
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local root = char:FindFirstChild("HumanoidRootPart")
+    
+    if not hum or not root then return false end
+    
+    cachedCharData = {
+        character = char,
+        humanoid = hum,
+        root = root,
+    }
+    
+    return true
+end
+
+-- Clean disconnect helper
+local function disconnectAll()
+    for _, conn in ipairs(ragdollConnections) do
+        if typeof(conn) == "RBXScriptConnection" then
+            pcall(function() conn:Disconnect() end)
+        end
+    end
+    ragdollConnections = {}
+end
+
+-- ============================================================
+-- RAGDOLL DETECTION
+-- ============================================================
+
+-- Check if currently ragdolled (using multiple detection methods)
+local function isRagdolled()
+    if not cachedCharData.humanoid then return false end
+    
+    local hum = cachedCharData.humanoid
+    local state = hum:GetState()
+    
+    -- State check
+    local ragdollStates = {
+        [Enum.HumanoidStateType.Physics] = true,
+        [Enum.HumanoidStateType.Ragdoll] = true,
+        [Enum.HumanoidStateType.FallingDown] = true
+    }
+    
+    if ragdollStates[state] then
+        return true
     end
     
-    lastSafeVelocity = hrp.Velocity
-    local lastCheck = tick()
-    local lastPosition = hrp.Position
+    -- Timer attribute check
+    local endTime = player:GetAttribute("RagdollEndTime")
+    if endTime then
+        local now = workspace:GetServerTimeNow()
+        if (endTime - now) > 0 then
+            return true
+        end
+    end
+    
+    return false
+end
 
-    antiKnockbackConn = game:GetService("RunService").Heartbeat:Connect(function()
-        local now = tick()
-        if now - lastCheck < UPDATE_INTERVAL then return end
-        lastCheck = now
+-- ============================================================
+-- RAGDOLL REMOVAL (MOVEABLE MODE)
+-- ============================================================
+
+-- Remove all ragdoll constraints
+local function removeRagdollConstraints()
+    if not cachedCharData.character then return end
+    
+    local removed = false
+    
+    for _, descendant in ipairs(cachedCharData.character:GetDescendants()) do
+        if descendant:IsA("BallSocketConstraint") or 
+           (descendant:IsA("Attachment") and descendant.Name:find("RagdollAttachment")) then
+            pcall(function()
+                descendant:Destroy()
+                removed = true
+            end)
+        end
+    end
+    
+    return removed
+end
+
+-- Force exit ragdoll state
+local function forceExitRagdoll()
+    if not cachedCharData.humanoid or not cachedCharData.root then return end
+    
+    local hum = cachedCharData.humanoid
+    local root = cachedCharData.root
+    
+    -- Clear ragdoll timer
+    pcall(function()
+        local now = workspace:GetServerTimeNow()
+        player:SetAttribute("RagdollEndTime", now)
+    end)
+    
+    -- Force standing state
+    if hum.Health >0 then
+        hum:ChangeState(Enum.HumanoidStateType.Running)
+    end
+    
+    -- Reset physics
+    root.Anchored = false
+    root.AssemblyLinearVelocity = Vector3.zero
+    root.AssemblyAngularVelocity = Vector3.zero
+end
+
+-- ============================================================
+-- MAIN ANTI-RAGDOLL LOOP (MOVEABLE)
+-- ============================================================
+
+-- Main heartbeat loop - removes ragdoll and allows movement
+local function antiRagdollLoop()
+    while antiRagdollActive and cachedCharData.humanoid do
+        task.wait()
         
-        local currentVel = hrp.Velocity
-        local currentPos = hrp.Position
-        local positionChange = (currentPos - lastPosition).Magnitude
-        lastPosition = currentPos
+        if isRagdolled() then
+            -- Remove constraints and force exit
+            removeRagdollConstraints()
+            forceExitRagdoll()
+        end
+    end
+end
 
-        local horizontalSpeed = Vector3.new(currentVel.X, 0, currentVel.Z).Magnitude
-        local lastHorizontalSpeed = Vector3.new(lastSafeVelocity.X, 0, lastSafeVelocity.Z).Magnitude
+-- Setup camera binding to prevent camera detachment
+local function setupCameraBinding()
+    if not cachedCharData.humanoid then return end
+    
+    local conn = RunService.RenderStepped:Connect(function()
+        if not antiRagdollActive then return end
         
-        local isKnockback = false
-
-        -- Syarat 1: Kelajuan mendatar melebihi had
-        if horizontalSpeed > VELOCITY_THRESHOLD and horizontalSpeed > lastHorizontalSpeed * 4 then
-            isKnockback = true
-        end
-
-        -- Syarat 2: Kelajuan menegak yang terlalu tinggi (letupan ke atas)
-        if math.abs(currentVel.Y) > 70 then
-            isKnockback = true
-        end
-
-        -- Syarat 3: Watak berada dalam keadaan ragdoll atau jatuh
-        if hum:GetState() == Enum.HumanoidStateType.Ragdoll or hum:GetState() == Enum.HumanoidStateType.FallingDown then
-            isKnockback = true
-        end
-
-        -- Syarat 4: Perubahan posisi yang besar secara mendadak
-        if positionChange > 10 and horizontalSpeed > 50 then
-            isKnockback = true
-        end
-
-        if isKnockback then
-            -- Tindakan jika knockback dikesan
-            if hum:GetState() == Enum.HumanoidStateType.Ragdoll or hum:GetState() == Enum.HumanoidStateType.FallingDown then
-                hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-                task.wait(0.1) -- Beri sedikit masa untuk perubahan state
-            end
-            
-            -- Hentikan semua daya pada semua bahagian badan
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.Velocity = Vector3.new(0, 0, 0)
-                    part.RotVelocity = Vector3.new(0, 0, 0)
-                    -- Hapus sebarang daya luaran yang ditambah oleh serangan
-                    for _, force in ipairs(part:GetChildren()) do
-                        if force:IsA("BodyVelocity") or force:IsA("BodyForce") or force:IsA("BodyAngularVelocity") or force:IsA("BodyGyro") then
-                            force:Destroy()
-                        end
-                    end
-                end
-            end
-            
-            hum.PlatformStand = false
-            hum.AutoRotate = true
-            lastSafeVelocity = Vector3.new(0, 0, 0)
-            print("[ANTI-KB] Knockback blocked! Speed: " .. math.floor(horizontalSpeed))
-        else
-            -- Kemas kini halaju "selamat" jika watak bergerak secara normal
-            local stable = hum:GetState() ~= Enum.HumanoidStateType.Freefall and hum:GetState() ~= Enum.HumanoidStateType.FallingDown and hum:GetState() ~= Enum.HumanoidStateType.Jumping
-            if stable and horizontalSpeed < VELOCITY_THRESHOLD then
-                lastSafeVelocity = currentVel
-            end
+        local cam = workspace.CurrentCamera
+        if cam and cachedCharData.humanoid and cam.CameraSubject ~= cachedCharData.humanoid then
+            cam.CameraSubject = cachedCharData.humanoid
         end
     end)
+    
+    table.insert(ragdollConnections, conn)
 end
 
-local function stopNoKnockback()
-    if antiKnockbackConn then
-        antiKnockbackConn:Disconnect()
-        antiKnockbackConn = nil
+-- ============================================================
+-- CHARACTER RESPAWN HANDLER
+-- ============================================================
+
+-- Handle character respawn
+local function onCharacterAdded(char)
+    task.wait(0.5) -- Wait for character to load
+    
+    if not antiRagdollActive then return end
+    
+    if cacheCharacterData() then
+        setupCameraBinding()
+        task.spawn(antiRagdollLoop)
     end
 end
 
-local function toggleAntiKnockback(state)
-    antiKnockbackEnabled = state
-    if antiKnockbackEnabled then
-        startNoKnockback()
-        print("✅ Anti Knockback: ON")
-    else
-        stopNoKnockback()
-        print("❌ Anti Knockback: OFF")
+-- ============================================================
+-- PUBLIC API
+-- ============================================================
+
+function ANTI_RAGDOLL.Enable()
+    if antiRagdollActive then 
+        warn("[Anti-Ragdoll] Already enabled!")
+        return 
     end
+    
+    -- Cache character data
+    if not cacheCharacterData() then
+        warn("[Anti-Ragdoll] Failed to cache character data")
+        return
+    end
+    
+    antiRagdollActive = true
+    
+    -- Setup character respawn listener
+    local charConn = player.CharacterAdded:Connect(onCharacterAdded)
+    table.insert(ragdollConnections, charConn)
+    
+    -- Start anti-ragdoll
+    setupCameraBinding()
+    task.spawn(antiRagdollLoop)
+    
+    print("✅ Anti-Ragdoll V2 (Moveable) Enabled")
+end
+
+function ANTI_RAGDOLL.Disable()
+    if not antiRagdollActive then return end
+    
+    antiRagdollActive = false
+    
+    -- Disconnect all
+    disconnectAll()
+    
+    -- Clear cache
+    cachedCharData = {}
+    
+    print("❌ Anti-Ragdoll V2 Disabled")
 end
 
 -- ==================== XRAY BASE FUNCTIONS (FIXED VERSION) ====================
@@ -2556,8 +2665,12 @@ local function toggleAutoSteal(state)
     end
 end
 
-local function toggleAntiKb(state)
-    toggleAntiKnockback(state)
+local function toggleAntiRagdoll(state)
+    if state then
+        ANTI_RAGDOLL.Enable()
+    else
+        ANTI_RAGDOLL.Disable()
+    end
 end
 
 local function toggleXrayBase(state)
@@ -2654,11 +2767,7 @@ player.CharacterAdded:Connect(function(newCharacter)
         print("🔄 Reloaded animation blocker after respawn")
     end
     
-    if antiKnockbackEnabled then
-        task.wait(1)
-        startNoKnockback()
-        print("🔄 Reloaded anti-knockback after respawn")
-    end
+    -- Anti-Ragdoll V2 handles its own respawn logic
     
     if xrayBaseEnabled then
         invisibleWallsLoaded = false
@@ -2696,7 +2805,7 @@ ArcadeUILib:AddToggleRow("Esp Players", toggleEspPlayers, "Esp Best", toggleEspB
 ArcadeUILib:AddToggleRow("Base Line", toggleBaseLine, "Anti Turret", toggleAntiTurret)
 ArcadeUILib:AddToggleRow("Aimbot", toggleAimbot, "Kick Steal", toggleKickSteal)
 ArcadeUILib:AddToggleRow("Unwalk Anim", toggleUnwalkAnim, "Auto Steal", toggleAutoSteal)
-ArcadeUILib:AddToggleRow("Anti Debuff", toggleAntiDebuff, "Anti Rdoll", toggleAntiKb)
+ArcadeUILib:AddToggleRow("Anti Debuff", toggleAntiDebuff, "Anti Rdoll", toggleAntiRagdoll)
 ArcadeUILib:AddToggleRow("Xray Base", toggleXrayBase, "Fps Boost", toggleFpsBoost)
 
 print("🎮 Arcade UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base & Fps Boost Loaded Successfully!")
