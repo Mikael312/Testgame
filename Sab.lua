@@ -1,5 +1,5 @@
 --[[
-    ARCADE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI RDOLL, XRAY BASE, FPS BOOST & ESP TIMER
+    ARCADE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI RDOLL, XRAY BASE, FPS BOOST, ESP TIMER & HIDE SKIN
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -111,6 +111,11 @@ local originalSettings = {}
 -- ==================== ESP TIMER VARIABLES ====================
 local timerEspEnabled = false
 local timerEspConnections = {}
+
+-- ==================== HIDE SKIN VARIABLES ====================
+local antiLagRunning = false
+local antiLagConnections = {}
+local cleanedCharacters = {}
 
 -- ==================== MODULES FOR ESP BEST ====================
 local AnimalsModule, TraitsModule, MutationsModule
@@ -2759,6 +2764,168 @@ local function disableTimerESP()
     print("❌ Timer ESP disabled")
 end
 
+-- ==================== HIDE SKIN FUNCTIONS ====================
+local function destroyAllEquippableItems(character)
+    if not character then return end
+    if not antiLagRunning then return end
+    
+    pcall(function()
+        -- Buang semua accessories (topi, rambut, face accessories, dll)
+        for _, child in ipairs(character:GetChildren()) do
+            if child:IsA("Accessory") or child:IsA("Hat") then
+                child:Destroy()
+            end
+        end
+        
+        -- Buang clothing
+        for _, child in ipairs(character:GetChildren()) do
+            if child:IsA("Shirt") or child:IsA("Pants") or child:IsA("ShirtGraphic") then
+                child:Destroy()
+            end
+        end
+        
+        -- Buang character meshes
+        for _, child in ipairs(character:GetChildren()) do
+            if child:IsA("CharacterMesh") then
+                child:Destroy()
+            end
+        end
+        
+        -- Buang layered clothing (modern avatar items)
+        for _, child in ipairs(character:GetDescendants()) do
+            if child.ClassName == "LayeredClothing" or child.ClassName == "WrapLayer" then
+                child:Destroy()
+            end
+        end
+        
+        -- Buang special meshes dari body parts
+        for _, child in ipairs(character:GetChildren()) do
+            if child:IsA("BasePart") then
+                local mesh = child:FindFirstChildOfClass("SpecialMesh")
+                if mesh then
+                    mesh:Destroy()
+                end
+            end
+        end
+        
+        -- Buang decals dan textures dari body parts (simpan face sahaja)
+        for _, child in ipairs(character:GetDescendants()) do
+            if child:IsA("Decal") or child:IsA("Texture") then
+                if not (child.Name == "face" and child.Parent and child.Parent.Name == "Head") then
+                    child:Destroy()
+                end
+            end
+        end
+    end)
+end
+
+local function antiLagCleanCharacter(char)
+    if not char then return end
+    
+    destroyAllEquippableItems(char)
+    cleanedCharacters[char] = true
+end
+
+local function antiLagDisconnectAll()
+    for _, conn in ipairs(antiLagConnections) do
+        if typeof(conn) == "RBXScriptConnection" then
+            conn:Disconnect()
+        end
+    end
+    antiLagConnections = {}
+    cleanedCharacters = {}
+end
+
+local function enableAntiLag()
+    if antiLagRunning then 
+        warn("[Anti-Lag] Sudah berjalan!")
+        return false
+    end
+    
+    antiLagRunning = true
+    
+    -- Bersihkan semua players yang ada SEKALI sahaja
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character then
+            antiLagCleanCharacter(plr.Character)
+        end
+    end
+    
+    -- Monitor players baru
+    table.insert(antiLagConnections, Players.PlayerAdded:Connect(function(plr)
+        table.insert(antiLagConnections, plr.CharacterAdded:Connect(function(char)
+            if not antiLagRunning then return end
+            task.wait(0.5)
+            antiLagCleanCharacter(char)
+            
+            -- Monitor items BARU yang ditambah ke character
+            table.insert(antiLagConnections, char.ChildAdded:Connect(function(child)
+                if not antiLagRunning then return end
+                task.wait(0.1)
+                
+                if child:IsA("Accessory") or child:IsA("Hat") or child:IsA("Shirt") or 
+                   child:IsA("Pants") or child:IsA("ShirtGraphic") or child:IsA("CharacterMesh") then
+                    child:Destroy()
+                end
+            end))
+        end))
+        
+        if plr.Character then
+            antiLagCleanCharacter(plr.Character)
+        end
+    end))
+    
+    -- Monitor existing player characters
+    for _, plr in ipairs(Players:GetPlayers()) do
+        table.insert(antiLagConnections, plr.CharacterAdded:Connect(function(char)
+            if antiLagRunning then
+                task.wait(0.5)
+                antiLagCleanCharacter(char)
+                
+                -- Monitor items BARU
+                table.insert(antiLagConnections, char.ChildAdded:Connect(function(child)
+                    if not antiLagRunning then return end
+                    task.wait(0.1)
+                    
+                    if child:IsA("Accessory") or child:IsA("Hat") or child:IsA("Shirt") or 
+                       child:IsA("Pants") or child:IsA("ShirtGraphic") or child:IsA("CharacterMesh") then
+                        child:Destroy()
+                    end
+                end))
+            end
+        end))
+    end
+    
+    -- Periodic cleanup (setiap 3 saat)
+    table.insert(antiLagConnections, task.spawn(function()
+        while antiLagRunning do
+            task.wait(3)
+            
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr.Character and not cleanedCharacters[plr.Character] then
+                    antiLagCleanCharacter(plr.Character)
+                end
+            end
+        end
+    end))
+    
+    print("✅ Anti-Lag Diaktifkan")
+    return true
+end
+
+local function disableAntiLag()
+    if not antiLagRunning then 
+        warn("[Anti-Lag] Tidak sedang berjalan!")
+        return false
+    end
+    
+    antiLagRunning = false
+    antiLagDisconnectAll()
+    
+    print("❌ Anti-Lag Dimatikan")
+    return true
+end
+
 -- ==================== TOGGLE FUNCTIONS FOR UI ====================
 local function toggleEspPlayers(state)
     if state then
@@ -2856,6 +3023,14 @@ local function toggleEspTimer(state)
     end
 end
 
+local function toggleHideSkin(state)
+    if state then
+        enableAntiLag()
+    else
+        disableAntiLag()
+    end
+end
+
 -- ==================== PLAYER EVENT HANDLERS ====================
 -- Apabila pemain baru masuk
 Players.PlayerAdded:Connect(function(targetPlayer)
@@ -2948,6 +3123,10 @@ player.CharacterAdded:Connect(function(newCharacter)
             end
         end
     end
+    
+    if antiLagRunning then
+        antiLagCleanCharacter(newCharacter)
+    end
 end)
 
 player.CharacterRemoving:Connect(function()
@@ -2974,7 +3153,7 @@ ArcadeUILib:AddToggleRow("Aimbot", toggleAimbot, "Kick Steal", toggleKickSteal)
 ArcadeUILib:AddToggleRow("Unwalk Anim", toggleUnwalkAnim, "Auto Steal", toggleAutoSteal)
 ArcadeUILib:AddToggleRow("Anti Debuff", toggleAntiDebuff, "Anti Rdoll", toggleAntiRagdoll)
 ArcadeUILib:AddToggleRow("Xray Base", toggleXrayBase, "Fps Boost", toggleFpsBoost)
-ArcadeUILib:AddToggleRow("Esp Timer", toggleEspTimer, "", nil)
+ArcadeUILib:AddToggleRow("Esp Timer", toggleEspTimer, "Hide Skin", toggleHideSkin)
 
-print("🎮 Arcade UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost & Esp Timer Loaded Successfully!")
+print("🎮 Arcade UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost, Esp Timer & Hide Skin Loaded Successfully!")
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Sabstealtoolsv1.lua"))()
