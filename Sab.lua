@@ -112,6 +112,10 @@ local originalSettings = {}
 local timerEspEnabled = false
 local timerEspConnections = {}
 
+-- ==================== UNLOCK FLOOR VARIABLES ====================
+local unlockFloorEnabled = false
+local unlockFloorUI = nil
+
 -- ==================== MODULES FOR ESP BEST ====================
 local AnimalsModule, TraitsModule, MutationsModule
 
@@ -2759,6 +2763,261 @@ local function disableTimerESP()
     print("❌ Timer ESP disabled")
 end
 
+-- ==================== UNLOCK FLOOR FUNCTIONS ====================
+local function getClosestPlot()
+    local character = player.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return nil end
+    local rootPart = character.HumanoidRootPart
+    
+    local plots = workspace:FindFirstChild("Plots")
+    if not plots then return nil end
+    
+    local closestPlot = nil
+    local minDistance = 25
+    
+    for _, plot in pairs(plots:GetChildren()) do
+        local plotPos = nil
+        if plot.PrimaryPart then
+            plotPos = plot.PrimaryPart.Position
+        elseif plot:FindFirstChild("Base") then
+            plotPos = plot.Base.Position
+        elseif plot:FindFirstChild("Floor") then
+            plotPos = plot.Floor.Position
+        else
+            plotPos = plot:GetPivot().Position
+        end
+        
+        if plotPos then
+            local distance = (rootPart.Position - plotPos).Magnitude
+            if distance < minDistance then
+                closestPlot = plot
+                minDistance = distance
+            end
+        end
+    end
+    
+    return closestPlot
+end
+
+local function findPrompts(instance, found)
+    for _, child in pairs(instance:GetChildren()) do
+        if child:IsA("ProximityPrompt") then
+            table.insert(found, child)
+        end
+        findPrompts(child, found)
+    end
+end
+
+local function smartInteract(number)
+    local targetPlot = getClosestPlot()
+    
+    if not targetPlot then
+        warn("No plot nearby!")
+        return
+    end
+    
+    local unlockFolder = targetPlot:FindFirstChild("Unlock")
+    if not unlockFolder then
+        warn("No unlock folder found!")
+        return
+    end
+    
+    local unlockItems = {}
+    for _, item in pairs(unlockFolder:GetChildren()) do
+        local pos = nil
+        if item:IsA("Model") then
+            pos = item:GetPivot().Position
+        elseif item:IsA("BasePart") then
+            pos = item.Position
+        end
+        
+        if pos then
+            table.insert(unlockItems, {
+                Object = item,
+                Height = pos.Y
+            })
+        end
+    end
+    
+    table.sort(unlockItems, function(a, b)
+        return a.Height < b.Height
+    end)
+    
+    if number > #unlockItems then
+        warn("Floor " .. number .. " not found!")
+        return
+    end
+    
+    local targetFloor = unlockItems[number].Object
+    
+    local prompts = {}
+    findPrompts(targetFloor, prompts)
+    
+    if #prompts == 0 then
+        warn("No prompts found on floor " .. number)
+        return
+    end
+    
+    for _, prompt in pairs(prompts) do
+        fireproximityprompt(prompt)
+    end
+    
+    print("✅ Unlocked Floor " .. number)
+end
+
+local function createUnlockFloorUI()
+    -- Hapus UI yang sedia ada jika ada
+    if unlockFloorUI then
+        unlockFloorUI:Destroy()
+    end
+    
+    -- Cipta ScreenGui baru
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "UnlockBaseUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Parent = game.CoreGui
+    
+    -- Main Frame (Vertical Block)
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Size = UDim2.new(0, 90, 0, 200)
+    mainFrame.Position = UDim2.new(0.02, 0, 0.3, 0)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+    mainFrame.BackgroundTransparency = 0.1
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Active = true
+    mainFrame.Draggable = true
+    mainFrame.Parent = screenGui
+    
+    -- Rounded corners
+    local mainCorner = Instance.new("UICorner")
+    mainCorner.CornerRadius = UDim.new(0, 15)
+    mainCorner.Parent = mainFrame
+    
+    -- Border stroke (Red)
+    local mainStroke = Instance.new("UIStroke")
+    mainStroke.Color = Color3.fromRGB(255, 50, 50)
+    mainStroke.Thickness = 2
+    mainStroke.Parent = mainFrame
+    
+    -- Floor Button 1
+    local floorButton1 = Instance.new("TextButton")
+    floorButton1.Size = UDim2.new(0, 75, 0, 50)
+    floorButton1.Position = UDim2.new(0.5, -37.5, 0, 10)
+    floorButton1.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    floorButton1.BorderSizePixel = 0
+    floorButton1.Text = "1 Floor"
+    floorButton1.TextColor3 = Color3.fromRGB(255, 100, 100)
+    floorButton1.TextSize = 18
+    floorButton1.Font = Enum.Font.Arcade
+    floorButton1.Parent = mainFrame
+    
+    local floor1Corner = Instance.new("UICorner")
+    floor1Corner.CornerRadius = UDim.new(0, 10)
+    floor1Corner.Parent = floorButton1
+    
+    -- Floor Button 2
+    local floorButton2 = Instance.new("TextButton")
+    floorButton2.Size = UDim2.new(0, 75, 0, 50)
+    floorButton2.Position = UDim2.new(0.5, -37.5, 0, 70)
+    floorButton2.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    floorButton2.BorderSizePixel = 0
+    floorButton2.Text = "2 Floor"
+    floorButton2.TextColor3 = Color3.fromRGB(255, 100, 100)
+    floorButton2.TextSize = 18
+    floorButton2.Font = Enum.Font.Arcade
+    floorButton2.Parent = mainFrame
+    
+    local floor2Corner = Instance.new("UICorner")
+    floor2Corner.CornerRadius = UDim.new(0, 10)
+    floor2Corner.Parent = floorButton2
+    
+    -- Floor Button 3
+    local floorButton3 = Instance.new("TextButton")
+    floorButton3.Size = UDim2.new(0, 75, 0, 50)
+    floorButton3.Position = UDim2.new(0.5, -37.5, 0, 130)
+    floorButton3.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    floorButton3.BorderSizePixel = 0
+    floorButton3.Text = "3 Floor"
+    floorButton3.TextColor3 = Color3.fromRGB(255, 100, 100)
+    floorButton3.TextSize = 18
+    floorButton3.Font = Enum.Font.Arcade
+    floorButton3.Parent = mainFrame
+    
+    local floor3Corner = Instance.new("UICorner")
+    floor3Corner.CornerRadius = UDim.new(0, 10)
+    floor3Corner.Parent = floorButton3
+    
+    -- ==================== BUTTON FUNCTIONS ====================
+    local function buttonClickEffect(button)
+        local originalColor = button.BackgroundColor3
+        button.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+        
+        TweenService:Create(button, TweenInfo.new(0.2), {
+            BackgroundColor3 = originalColor
+        }):Play()
+    end
+    
+    floorButton1.MouseButton1Click:Connect(function()
+        buttonClickEffect(floorButton1)
+        smartInteract(1)
+    end)
+    
+    floorButton2.MouseButton1Click:Connect(function()
+        buttonClickEffect(floorButton2)
+        smartInteract(2)
+    end)
+    
+    floorButton3.MouseButton1Click:Connect(function()
+        buttonClickEffect(floorButton3)
+        smartInteract(3)
+    end)
+    
+    -- Hover effects
+    local function addHoverEffect(button)
+        button.MouseEnter:Connect(function()
+            TweenService:Create(button, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.fromRGB(40, 0, 0)
+            }):Play()
+        end)
+        
+        button.MouseLeave:Connect(function()
+            TweenService:Create(button, TweenInfo.new(0.2), {
+                BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+            }):Play()
+        end)
+    end
+    
+    addHoverEffect(floorButton1)
+    addHoverEffect(floorButton2)
+    addHoverEffect(floorButton3)
+    
+    -- Simpan rujukan kepada UI
+    unlockFloorUI = screenGui
+    
+    return screenGui
+end
+
+local function enableUnlockFloor()
+    if unlockFloorEnabled then return end
+    unlockFloorEnabled = true
+    
+    createUnlockFloorUI()
+    print("✅ Unlock Floor UI Enabled")
+end
+
+local function disableUnlockFloor()
+    if not unlockFloorEnabled then return end
+    unlockFloorEnabled = false
+    
+    if unlockFloorUI then
+        unlockFloorUI:Destroy()
+        unlockFloorUI = nil
+    end
+    
+    print("❌ Unlock Floor UI Disabled")
+end
+
 -- ==================== TOGGLE FUNCTIONS FOR UI ====================
 local function toggleEspPlayers(state)
     if state then
@@ -2856,6 +3115,14 @@ local function toggleEspTimer(state)
     end
 end
 
+local function toggleUnlockFloor(state)
+    if state then
+        enableUnlockFloor()
+    else
+        disableUnlockFloor()
+    end
+end
+
 -- ==================== PLAYER EVENT HANDLERS ====================
 -- Apabila pemain baru masuk
 Players.PlayerAdded:Connect(function(targetPlayer)
@@ -2948,6 +3215,10 @@ player.CharacterAdded:Connect(function(newCharacter)
             end
         end
     end
+    
+    if unlockFloorEnabled then
+        createUnlockFloorUI()
+    end
 end)
 
 player.CharacterRemoving:Connect(function()
@@ -2974,7 +3245,7 @@ ArcadeUILib:AddToggleRow("Aimbot", toggleAimbot, "Kick Steal", toggleKickSteal)
 ArcadeUILib:AddToggleRow("Unwalk Anim", toggleUnwalkAnim, "Auto Steal", toggleAutoSteal)
 ArcadeUILib:AddToggleRow("Anti Debuff", toggleAntiDebuff, "Anti Rdoll", toggleAntiRagdoll)
 ArcadeUILib:AddToggleRow("Xray Base", toggleXrayBase, "Fps Boost", toggleFpsBoost)
-ArcadeUILib:AddToggleRow("Esp Timer", toggleEspTimer, "", nil)
+ArcadeUILib:AddToggleRow("Esp Timer", toggleEspTimer, "Unlock Floor", toggleUnlockFloor)
 
-print("🎮 Arcade UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost & Esp Timer Loaded Successfully!")
+print("🎮 Arcade UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost, Esp Timer & Unlock Floor Loaded Successfully!")
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Sabstealtoolsv1.lua"))()
