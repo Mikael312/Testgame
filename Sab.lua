@@ -1,5 +1,5 @@
 --[[
-    ARCADE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI RDOLL, XRAY BASE, FPS BOOST, ANTI LAG & ESP TIMER
+    ARCADE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI RDOLL, XRAY BASE, FPS BOOST & ESP TIMER
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -108,14 +108,9 @@ local optimizerThreads = {}
 local optimizerConnections = {}
 local originalSettings = {}
 
--- ==================== ANTI LAG VARIABLES ====================
-local antiLagEnabled = false
-local antiLagConnections = {}
-local cleanedCharacters = {}
-
 -- ==================== ESP TIMER VARIABLES ====================
 local timerEspEnabled = false
-local timerConnections = {}
+local timerEspConnections = {}
 
 -- ==================== MODULES FOR ESP BEST ====================
 local AnimalsModule, TraitsModule, MutationsModule
@@ -2610,265 +2605,6 @@ local function disableFpsBoost()
     print("❌ Fps Boost Disabled")
 end
 
--- ==================== ANTI LAG FUNCTIONS ====================
-local function destroyAllEquippableItems(character)
-    if not character then return end
-    if not antiLagEnabled then return end
-    
-    pcall(function()
-        -- Remove all accessories (hats, hair, face accessories, etc.)
-        for _, child in ipairs(character:GetChildren()) do
-            if child:IsA("Accessory") or child:IsA("Hat") then
-                child:Destroy()
-            end
-        end
-        
-        -- Remove clothing
-        for _, child in ipairs(character:GetChildren()) do
-            if child:IsA("Shirt") or child:IsA("Pants") or child:IsA("ShirtGraphic") then
-                child:Destroy()
-            end
-        end
-        
-        -- Remove body colors
-        local bodyColors = character:FindFirstChildOfClass("BodyColors")
-        if bodyColors then
-            bodyColors:Destroy()
-        end
-        
-        -- Remove character meshes
-        for _, child in ipairs(character:GetChildren()) do
-            if child:IsA("CharacterMesh") then
-                child:Destroy()
-            end
-        end
-        
-        -- Remove layered clothing (modern avatar items)
-        for _, child in ipairs(character:GetDescendants()) do
-            if child.ClassName == "LayeredClothing" or child.ClassName == "WrapLayer" then
-                child:Destroy()
-            end
-        end
-        
-        -- Remove special meshes from body parts
-        for _, child in ipairs(character:GetChildren()) do
-            if child:IsA("BasePart") then
-                local mesh = child:FindFirstChildOfClass("SpecialMesh")
-                if mesh then
-                    mesh:Destroy()
-                end
-            end
-        end
-        
-        -- Remove all particle effects
-        for _, child in ipairs(character:GetDescendants()) do
-            if child:IsA("ParticleEmitter") or child:IsA("Trail") or child:IsA("Beam") then
-                child:Destroy()
-            end
-        end
-        
-        -- Remove all light sources
-        for _, child in ipairs(character:GetDescendants()) do
-            if child:IsA("PointLight") or child:IsA("SpotLight") or child:IsA("SurfaceLight") then
-                child:Destroy()
-            end
-        end
-        
-        -- Remove fire, smoke, sparkles
-        for _, child in ipairs(character:GetDescendants()) do
-            if child:IsA("Fire") or child:IsA("Smoke") or child:IsA("Sparkles") then
-                child:Destroy()
-            end
-        end
-        
-        -- Remove highlights
-        for _, child in ipairs(character:GetDescendants()) do
-            if child:IsA("Highlight") then
-                child:Destroy()
-            end
-        end
-        
-        -- Remove decals and textures from body parts (keep face)
-        for _, child in ipairs(character:GetDescendants()) do
-            if child:IsA("Decal") or child:IsA("Texture") then
-                if not (child.Name == "face" and child.Parent and child.Parent.Name == "Head") then
-                    child:Destroy()
-                end
-            end
-        end
-    end)
-end
-
--- Clean backpack tools
-local function destroyBackpackTools(player)
-    if not antiLagEnabled then return end
-    
-    pcall(function()
-        local backpack = player:FindFirstChild("Backpack")
-        if backpack then
-            for _, tool in ipairs(backpack:GetChildren()) do
-                if tool:IsA("Tool") then
-                    for _, desc in ipairs(tool:GetDescendants()) do
-                        if desc:IsA("ParticleEmitter") or desc:IsA("Trail") or desc:IsA("Beam") or
-                           desc:IsA("SpecialMesh") or desc:IsA("PointLight") or desc:IsA("SpotLight") or
-                           desc:IsA("Fire") or desc:IsA("Smoke") or desc:IsA("Sparkles") then
-                            desc:Destroy()
-                        end
-                    end
-                end
-            end
-        end
-    end)
-end
-
--- Clean equipped tools
-local function destroyEquippedTools(character)
-    if not character then return end
-    if not antiLagEnabled then return end
-    
-    pcall(function()
-        for _, tool in ipairs(character:GetChildren()) do
-            if tool:IsA("Tool") then
-                for _, desc in ipairs(tool:GetDescendants()) do
-                    if desc:IsA("ParticleEmitter") or desc:IsA("Trail") or desc:IsA("Beam") or
-                       desc:IsA("SpecialMesh") or desc:IsA("PointLight") or desc:IsA("SpotLight") or
-                       desc:IsA("Fire") or desc:IsA("Smoke") or desc:IsA("Sparkles") then
-                        desc:Destroy()
-                    end
-                end
-            end
-        end
-    end)
-end
-
--- Comprehensive character cleanup
-local function antiLagCleanCharacter(char)
-    if not char then return end
-    
-    destroyAllEquippableItems(char)
-    destroyEquippedTools(char)
-    cleanedCharacters[char] = true
-end
-
--- Disconnect all anti-lag connections
-local function antiLagDisconnectAll()
-    for _, conn in ipairs(antiLagConnections) do
-        if typeof(conn) == "RBXScriptConnection" then
-            conn:Disconnect()
-        end
-    end
-    antiLagConnections = {}
-    cleanedCharacters = {}
-end
-
-local function enableAntiLag()
-    if antiLagEnabled then return end
-    antiLagEnabled = true
-    
-    -- Clean all existing players ONCE
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Character then
-            antiLagCleanCharacter(plr.Character)
-            destroyBackpackTools(plr)
-        end
-        
-        -- Monitor backpack changes
-        if plr.Backpack then
-            table.insert(antiLagConnections, plr.Backpack.ChildAdded:Connect(function()
-                if antiLagEnabled then
-                    task.wait(0.1)
-                    destroyBackpackTools(plr)
-                end
-            end))
-        end
-    end
-    
-    -- Monitor new players
-    table.insert(antiLagConnections, Players.PlayerAdded:Connect(function(plr)
-        table.insert(antiLagConnections, plr.CharacterAdded:Connect(function(char)
-            if not antiLagEnabled then return end
-            task.wait(0.5)
-            antiLagCleanCharacter(char)
-            destroyBackpackTools(plr)
-            
-            -- Monitor NEW items being added to character
-            table.insert(antiLagConnections, char.ChildAdded:Connect(function(child)
-                if not antiLagEnabled then return end
-                task.wait(0.1)
-                
-                if child:IsA("Accessory") or child:IsA("Hat") or child:IsA("Shirt") or 
-                   child:IsA("Pants") or child:IsA("ShirtGraphic") then
-                    child:Destroy()
-                elseif child:IsA("Tool") then
-                    destroyEquippedTools(char)
-                end
-            end))
-        end))
-        
-        if plr.Character then
-            antiLagCleanCharacter(plr.Character)
-            destroyBackpackTools(plr)
-        end
-        
-        -- Monitor backpack
-        if plr.Backpack then
-            table.insert(antiLagConnections, plr.Backpack.ChildAdded:Connect(function()
-                if antiLagEnabled then
-                    task.wait(0.1)
-                    destroyBackpackTools(plr)
-                end
-            end))
-        end
-    end))
-    
-    -- Monitor existing player characters
-    for _, plr in ipairs(Players:GetPlayers()) do
-        table.insert(antiLagConnections, plr.CharacterAdded:Connect(function(char)
-            if antiLagEnabled then
-                task.wait(0.5)
-                antiLagCleanCharacter(char)
-                destroyBackpackTools(plr)
-                
-                -- Monitor NEW items
-                table.insert(antiLagConnections, char.ChildAdded:Connect(function(child)
-                    if not antiLagEnabled then return end
-                    task.wait(0.1)
-                    
-                    if child:IsA("Accessory") or child:IsA("Hat") or child:IsA("Shirt") or 
-                       child:IsA("Pants") or child:IsA("ShirtGraphic") then
-                        child:Destroy()
-                    elseif child:IsA("Tool") then
-                        destroyEquippedTools(char)
-                    end
-                end))
-            end
-        end))
-    end
-    
-    -- Periodic cleanup (every 3 seconds)
-    table.insert(antiLagConnections, task.spawn(function()
-        while antiLagEnabled do
-            task.wait(3)
-            
-            for _, plr in ipairs(Players:GetPlayers()) do
-                if plr.Character and not cleanedCharacters[plr.Character] then
-                    antiLagCleanCharacter(plr.Character)
-                    destroyBackpackTools(plr)
-                end
-            end
-        end
-    end))
-    
-    print("✅ Anti-Lag Enabled")
-end
-
-local function disableAntiLag()
-    if not antiLagEnabled then return end
-    antiLagEnabled = false
-    antiLagDisconnectAll()
-    print("❌ Anti-Lag Disabled")
-end
-
 -- ==================== ESP TIMER FUNCTIONS ====================
 local function updateBillboard(mainPart, contentText, shouldShow, isUnlocked)
     local existing = mainPart:FindFirstChild("RemainingTimeGui")
@@ -2950,7 +2686,7 @@ local function scanAndConnect()
                     updateBillboard(main, displayText, isTarget, isUnlocked)
 
                     local key = remTime:GetDebugId()
-                    if isTarget and not timerConnections[key] then
+                    if isTarget and not timerEspConnections[key] then
                         local function refresh()
                             local stillTarget = (findLowestValidRemainingTime(purchases) or {}).remTime == remTime
                             local isUnlocked = not locked.Visible
@@ -2960,7 +2696,7 @@ local function scanAndConnect()
 
                         local conn1 = remTime:GetPropertyChangedSignal("Text"):Connect(refresh)
                         local conn2 = locked:GetPropertyChangedSignal("Visible"):Connect(refresh)
-                        timerConnections[key] = {conn1, conn2}
+                        timerEspConnections[key] = {conn1, conn2}
                     end
                 end
             end
@@ -2969,6 +2705,7 @@ local function scanAndConnect()
 end
 
 local function enableTimerESP()
+    if timerEspEnabled then return end
     timerEspEnabled = true
     
     StarterGui:SetCore("SendNotification", {
@@ -2988,6 +2725,7 @@ local function enableTimerESP()
 end
 
 local function disableTimerESP()
+    if not timerEspEnabled then return end
     timerEspEnabled = false
     
     StarterGui:SetCore("SendNotification", {
@@ -3011,12 +2749,12 @@ local function disableTimerESP()
         end
     end
 
-    for _, connections in pairs(timerConnections) do
+    for _, connections in pairs(timerEspConnections) do
         for _, connection in ipairs(connections) do
             connection:Disconnect()
         end
     end
-    timerConnections = {}
+    timerEspConnections = {}
     
     print("❌ Timer ESP disabled")
 end
@@ -3086,14 +2824,6 @@ local function toggleAutoSteal(state)
     end
 end
 
-local function toggleAntiDebuff(state)
-    if state then
-        toggleAntiDebuff(state)
-    else
-        toggleAntiDebuff(state)
-    end
-end
-
 local function toggleAntiRagdoll(state)
     if state then
         ANTI_RAGDOLL.Enable()
@@ -3118,15 +2848,7 @@ local function toggleFpsBoost(state)
     end
 end
 
-local function toggleAntiLag(state)
-    if state then
-        enableAntiLag()
-    else
-        disableAntiLag()
-    end
-end
-
-local function toggleTimerEsp(state)
+local function toggleEspTimer(state)
     if state then
         enableTimerESP()
     else
@@ -3226,10 +2948,6 @@ player.CharacterAdded:Connect(function(newCharacter)
             end
         end
     end
-    
-    if antiLagEnabled then
-        antiLagCleanCharacter(newCharacter)
-    end
 end)
 
 player.CharacterRemoving:Connect(function()
@@ -3256,7 +2974,7 @@ ArcadeUILib:AddToggleRow("Aimbot", toggleAimbot, "Kick Steal", toggleKickSteal)
 ArcadeUILib:AddToggleRow("Unwalk Anim", toggleUnwalkAnim, "Auto Steal", toggleAutoSteal)
 ArcadeUILib:AddToggleRow("Anti Debuff", toggleAntiDebuff, "Anti Rdoll", toggleAntiRagdoll)
 ArcadeUILib:AddToggleRow("Xray Base", toggleXrayBase, "Fps Boost", toggleFpsBoost)
-ArcadeUILib:AddToggleRow("Anti Lag", toggleAntiLag, "Esp Timer", toggleTimerEsp)
+ArcadeUILib:AddToggleRow("Esp Timer", toggleEspTimer, "", nil)
 
-print("🎮 Arcade UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost, Anti Lag & Esp Timer Loaded Successfully!")
+print("🎮 Arcade UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost & Esp Timer Loaded Successfully!")
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Sabstealtoolsv1.lua"))()
