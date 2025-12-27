@@ -2764,7 +2764,7 @@ local function disableTimerESP()
     print("❌ Timer ESP disabled")
 end
 
--- ==================== HIDE SKIN FUNCTIONS ====================
+-- ==================== HIDE SKIN FUNCTIONS (MODIFIED) ====================
 local function destroyAllEquippableItems(character)
     if not character then return end
     if not antiLagRunning then return end
@@ -2791,19 +2791,14 @@ local function destroyAllEquippableItems(character)
             end
         end
         
-        -- Buang layered clothing (modern avatar items)
+        -- Buang layered clothing (modern avatar items) - Hanya yang bukan essential
         for _, child in ipairs(character:GetDescendants()) do
             if child.ClassName == "LayeredClothing" or child.ClassName == "WrapLayer" then
-                child:Destroy()
-            end
-        end
-        
-        -- Buang special meshes dari body parts
-        for _, child in ipairs(character:GetChildren()) do
-            if child:IsA("BasePart") then
-                local mesh = child:FindFirstChildOfClass("SpecialMesh")
-                if mesh then
-                    mesh:Destroy()
+                -- Hanya buang jika bukan bahagian penting watak
+                if child.Parent and child.Parent.Name ~= "HumanoidRootPart" and 
+                   child.Parent.Name ~= "UpperTorso" and child.Parent.Name ~= "LowerTorso" and
+                   child.Parent.Name ~= "Head" then
+                    child:Destroy()
                 end
             end
         end
@@ -2896,10 +2891,10 @@ local function enableAntiLag()
         end))
     end
     
-    -- Periodic cleanup (setiap 3 saat)
+    -- Periodic cleanup (setiap 5 saat - lebih lama untuk mengurangkan beban)
     table.insert(antiLagConnections, task.spawn(function()
         while antiLagRunning do
-            task.wait(3)
+            task.wait(5)
             
             for _, plr in ipairs(Players:GetPlayers()) do
                 if plr.Character and not cleanedCharacters[plr.Character] then
