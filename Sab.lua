@@ -1,5 +1,5 @@
 --[[
-    ARCADE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI RDOLL, XRAY BASE, FPS BOOST & ESP TIMER
+    ARCADE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI RDOLL, XRAY BASE, FPS BOOST, ESP TIMER & HIDE SKIN
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -111,6 +111,10 @@ local originalSettings = {}
 -- ==================== ESP TIMER VARIABLES ====================
 local timerEspEnabled = false
 local timerEspConnections = {}
+
+-- ==================== HIDE SKIN VARIABLES ====================
+local hideSkinRunning = false
+local hideSkinConnections = {}
 
 -- ==================== MODULES FOR ESP BEST ====================
 local AnimalsModule, TraitsModule, MutationsModule
@@ -2759,6 +2763,84 @@ local function disableTimerESP()
     print("❌ Timer ESP disabled")
 end
 
+-- ==================== HIDE SKIN FUNCTIONS (NEW) ====================
+local function cleanCharacter(character)
+    if not character then return end
+    if not hideSkinRunning then return end
+    
+    pcall(function()
+        -- Buang accessories
+        for _, child in ipairs(character:GetChildren()) do
+            if child:IsA("Accessory") or child:IsA("Hat") then
+                child:Destroy()
+            end
+        end
+        
+        -- Buang clothing
+        for _, child in ipairs(character:GetChildren()) do
+            if child:IsA("Shirt") or child:IsA("Pants") or child:IsA("ShirtGraphic") then
+                child:Destroy()
+            end
+        end
+        
+        -- Buang character meshes
+        for _, child in ipairs(character:GetChildren()) do
+            if child:IsA("CharacterMesh") then
+                child:Destroy()
+            end
+        end
+        
+        -- Buang layered clothing
+        for _, child in ipairs(character:GetDescendants()) do
+            if child.ClassName == "LayeredClothing" or child.ClassName == "WrapLayer" then
+                child:Destroy()
+            end
+        end
+    end)
+end
+
+local function enableHideSkin()
+    if hideSkinRunning then return false end
+    hideSkinRunning = true
+    
+    -- Clean semua player yang ada
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character then
+            cleanCharacter(plr.Character)
+        end
+    end
+    
+    -- Monitor player baru
+    table.insert(hideSkinConnections, Players.PlayerAdded:Connect(function(plr)
+        plr.CharacterAdded:Connect(function(char)
+            if hideSkinRunning then
+                task.wait(0.5)
+                cleanCharacter(char)
+            end
+        end)
+    end))
+    
+    print("✅ Hide Skin Enabled")
+    return true
+end
+
+local function disableHideSkin()
+    if not hideSkinRunning then return false end
+    
+    hideSkinRunning = false
+    
+    -- Disconnect semua connections
+    for _, conn in ipairs(hideSkinConnections) do
+        if typeof(conn) == "RBXScriptConnection" then
+            conn:Disconnect()
+        end
+    end
+    hideSkinConnections = {}
+    
+    print("❌ Hide Skin Disabled")
+    return true
+end
+
 -- ==================== TOGGLE FUNCTIONS FOR UI ====================
 local function toggleEspPlayers(state)
     if state then
@@ -2856,6 +2938,14 @@ local function toggleEspTimer(state)
     end
 end
 
+local function toggleHideSkin(state)
+    if state then
+        enableHideSkin()
+    else
+        disableHideSkin()
+    end
+end
+
 -- ==================== PLAYER EVENT HANDLERS ====================
 -- Apabila pemain baru masuk
 Players.PlayerAdded:Connect(function(targetPlayer)
@@ -2948,6 +3038,10 @@ player.CharacterAdded:Connect(function(newCharacter)
             end
         end
     end
+    
+    if hideSkinRunning then
+        cleanCharacter(newCharacter)
+    end
 end)
 
 player.CharacterRemoving:Connect(function()
@@ -2974,7 +3068,7 @@ ArcadeUILib:AddToggleRow("Aimbot", toggleAimbot, "Kick Steal", toggleKickSteal)
 ArcadeUILib:AddToggleRow("Unwalk Anim", toggleUnwalkAnim, "Auto Steal", toggleAutoSteal)
 ArcadeUILib:AddToggleRow("Anti Debuff", toggleAntiDebuff, "Anti Rdoll", toggleAntiRagdoll)
 ArcadeUILib:AddToggleRow("Xray Base", toggleXrayBase, "Fps Boost", toggleFpsBoost)
-ArcadeUILib:AddToggleRow("Esp Timer", toggleEspTimer, "", nil)
+ArcadeUILib:AddToggleRow("Esp Timer", toggleEspTimer, "Hide Skin", toggleHideSkin)
 
-print("🎮 Arcade UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost & Esp Timer Loaded Successfully!")
+print("🎮 Arcade UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost, Esp Timer & Hide Skin Loaded Successfully!")
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Sabstealtoolsv1.lua"))()
