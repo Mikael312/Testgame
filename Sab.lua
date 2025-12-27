@@ -1,7 +1,7 @@
 --[[
     ARCADE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI RDOLL, XRAY BASE, FPS BOOST & ESP TIMER
-    STRUCTURE: G. (Global/Shared) & S. (Specific/Modules)
-    FIXED: Full logic restored, Toggles visible, Loadstring protected.
+    STRUCTURE: G. (Global) & S. (Specific)
+    FIXED: Crash logic, Invalid pairs, UI Protection.
 ]]
 
 -- ==================== ROOT ENVIRONMENT ====================
@@ -20,7 +20,7 @@ if not Script.G.Success then
     return
 end
 
--- Assign global for compatibility if library needs it
+-- Assign global for compatibility
 ArcadeUILib = Script.G.ArcadeUILib
 
 -- ==================== G. SERVICES & VARIABLES ====================
@@ -214,7 +214,7 @@ Script.S.EspBest = {
         
         for _, plot in pairs(plots:GetChildren()) do
             local plotSign = plot:FindFirstChild("PlotSign")
-            if plotSign and plotSign:FindFirstChild("YourBase") and not plotSign.YourBase.Enabled then -- Not my base
+            if plotSign and plotSign:FindFirstChild("YourBase") and not plotSign.YourBase.Enabled then 
                 for _, obj in pairs(plot:GetDescendants()) do
                     if obj:IsA("Model") and Script.G.Modules.Animals and Script.G.Modules.Animals[obj.Name] then
                         pcall(function()
@@ -239,13 +239,11 @@ Script.S.EspBest = {
         if not part then return end
 
         pcall(function()
-            -- Cleanup old
             if Script.S.EspBest.Objects.highlight then Script.S.EspBest.Objects.highlight:Destroy() end
             if Script.S.EspBest.Objects.nameLabel then Script.S.EspBest.Objects.nameLabel:Destroy() end
             if Script.S.EspBest.Objects.box then Script.S.EspBest.Objects.box:Destroy() end
             if Script.S.EspBest.Objects.podium then Script.S.EspBest.Objects.podium:Destroy() end
 
-            -- Highlight
             local highlight = Instance.new("Highlight", model)
             highlight.Name = "BrainrotESPHighlight"
             highlight.Adornee = model
@@ -256,7 +254,6 @@ Script.S.EspBest = {
             highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
             Script.S.EspBest.Objects.highlight = highlight
 
-            -- Box
             local box = Instance.new("BoxHandleAdornment")
             box.Name = "BrainrotBoxHighlight"
             box.Adornee = part
@@ -268,7 +265,6 @@ Script.S.EspBest = {
             box.Parent = part
             Script.S.EspBest.Objects.box = box
 
-            -- Billboard
             local billboard = Instance.new("BillboardGui", part)
             billboard.Size = UDim2.new(0, 220, 0, 80)
             billboard.StudsOffset = Vector3.new(0, 8, 0)
@@ -304,7 +300,6 @@ Script.S.EspBest = {
             Script.S.EspBest.Objects.nameLabel = billboard
             Script.S.EspBest.Data = data
 
-            -- Notification
             if Script.S.EspBest.Enabled then
                 local uid = data.petName .. data.formattedValue
                 if Script.S.EspBest.LastNotified ~= uid then
@@ -572,7 +567,7 @@ Script.S.AntiTurret = {
             running = false
             if followConn then followConn:Disconnect() Script.S.AntiTurret.FollowConns[desc] = nil end
             Script.S.AntiTurret.Active[desc] = nil
-            Script.S.AntiTurret.FindBat().Parent = Script.G.Player.Backpack -- Unequip
+            Script.S.AntiTurret.FindBat().Parent = Script.G.Player.Backpack
         end
 
         local destroyConn = desc.AncestryChanged:Connect(function()
@@ -775,7 +770,7 @@ Script.S.UnwalkAnim = {
     end
 }
 
--- ==================== S. AUTO STEAL ====================
+-- ==================== S. AUTO STEAL (FIXED) ====================
 Script.S.AutoSteal = {
     Enabled = false,
     Connection = nil,
@@ -850,10 +845,16 @@ Script.S.AutoSteal = {
         local newCache = {}
         
         for _, plot in ipairs(plots:GetChildren()) do
+            if not Script.G.Modules.Synchronizer then break end
             local channel = Script.G.Modules.Synchronizer:Get(plot.Name)
             if not channel then continue end
+            
             local animalList = channel:Get("AnimalList")
+            -- FIX: Cek jika animalList wujud dan ia adalah table
+            if not animalList or type(animalList) ~= "table" then continue end
+            
             local owner = channel:Get("Owner")
+            if not owner then continue end
             
             for slot, data in pairs(animalList) do
                 if type(data) == "table" then
@@ -932,7 +933,7 @@ Script.S.AutoSteal = {
     end
 }
 
--- ==================== S. ANTI DEBUFF ====================
+-- ==================== S. ANTI DEBUFF (FIXED) ====================
 Script.S.AntiDebuff = {
     Bee = false, Boogie = false,
     HandlerActive = false,
@@ -943,8 +944,12 @@ Script.S.AntiDebuff = {
     BoogieID = "109061983885712",
 
     UpdateHandler = function()
-        local remote = pcall(function() return Script.G.Modules.Net:RemoteEvent("UseItem") end)
-        if not remote then return end
+        -- FIX: Pcall unpacking yang betul
+        local ok, Event = pcall(function()
+            return Script.G.Modules.Net:RemoteEvent("UseItem")
+        end)
+        
+        if not ok or not Event then return end
 
         if not Script.S.AntiDebuff.Bee and not Script.S.AntiDebuff.Boogie then
             if Script.S.AntiDebuff.HandlerActive then
@@ -956,8 +961,8 @@ Script.S.AntiDebuff = {
         end
 
         if (Script.S.AntiDebuff.Bee or Script.S.AntiDebuff.Boogie) and not Script.S.AntiDebuff.HandlerActive then
-            for i, v in pairs(getconnections(remote.OnClientEvent)) do table.insert(Script.S.AntiDebuff.Conns, v) pcall(function() v:Disable() end) end
-            Script.S.AntiDebuff.UnifiedConn = remote.OnClientEvent:Connect(function(action, ...)
+            for i, v in pairs(getconnections(Event.OnClientEvent)) do table.insert(Script.S.AntiDebuff.Conns, v) pcall(function() v:Disable() end) end
+            Script.S.AntiDebuff.UnifiedConn = Event.OnClientEvent:Connect(function(action, ...)
                 if Script.S.AntiDebuff.Bee and action == "Bee Attack" then return end
                 if Script.S.AntiDebuff.Boogie and action == "Boogie" then return end
             end)
@@ -1032,9 +1037,7 @@ Script.S.AntiRagdoll = {
         local c = Script.S.AntiRagdoll.Cached.char
         if not c then return end
         for _, v in ipairs(c:GetDescendants()) do
-            if v:IsA("BallSocketConstraint") or (v:IsA("Attachment") and v.Name:find("RagdollAttachment")) then
-                pcall(function() v:Destroy() end)
-            end
+            if v:IsA("BallSocketConstraint") or (v:IsA("Attachment") and v.Name:find("RagdollAttachment")) then pcall(function() v:Destroy() end) end
         end
     end,
 
@@ -1226,7 +1229,6 @@ Script.S.FpsBoost = {
             Script.S.FpsBoost.Enabled = true
             getgenv().OPTIMIZER_ACTIVE = true
             
-            -- Store Settings
             pcall(function()
                 Script.S.FpsBoost.Original = {
                     streamingEnabled = Script.G.Services.Workspace.StreamingEnabled,
@@ -1239,10 +1241,8 @@ Script.S.FpsBoost = {
                 }
             end)
 
-            -- Apply FFlags
             for flag, val in pairs(Script.S.FpsBoost.PERFORMANCE_FFLAGS) do pcall(function() setfflag(flag, tostring(val)) end) end
 
-            -- Apply Settings
             pcall(function()
                 Script.G.Services.Workspace.StreamingEnabled = true
                 Script.G.Services.Workspace.StreamingMinRadius = 64
@@ -1257,7 +1257,6 @@ Script.S.FpsBoost = {
                 setfpscap(999)
             end)
 
-            -- Threads
             table.insert(Script.S.FpsBoost.Threads, task.spawn(Script.S.FpsBoost.NukeVisuals))
             table.insert(Script.S.FpsBoost.Conns, Script.G.Services.Workspace.DescendantAdded:Connect(function(obj)
                 if not getgenv().OPTIMIZER_ACTIVE then return end
@@ -1367,7 +1366,6 @@ Script.S.EspTimer = {
         else
             if not Script.S.EspTimer.Enabled then return end
             Script.S.EspTimer.Enabled = false
-            -- Cleanup guis
             for _, plot in pairs(Script.G.Services.Workspace.Plots:GetChildren()) do
                 local pur = plot:FindFirstChild("Purchases")
                 if pur then
@@ -1426,21 +1424,21 @@ task.spawn(function()
     while task.wait(5) do Script.S.AutoSteal.ScanPlots() end
 end)
 
--- ==================== UI SETUP ====================
+-- ==================== UI SETUP (PROTECTED) ====================
 Script.G.ArcadeUILib:CreateUI()
-Script.G.ArcadeUILib:Notify("Modular Hub Loaded")
+Script.G.ArcadeUILib:Notify("Nightmare Hub")
 
-Script.G.ArcadeUILib:AddToggleRow("Esp Players", function(s) Script.S.EspPlayers.Toggle(s) end, "Esp Best", function(s) Script.S.EspBest.Toggle(s) end)
-Script.G.ArcadeUILib:AddToggleRow("Base Line", function(s) Script.S.BaseLine.Toggle(s) end, "Anti Turret", function(s) Script.S.AntiTurret.Toggle(s) end)
-Script.G.ArcadeUILib:AddToggleRow("Aimbot", function(s) Script.S.Aimbot.Toggle(s) end, "Kick Steal", function(s) Script.S.KickSteal.Toggle(s) end)
-Script.G.ArcadeUILib:AddToggleRow("Unwalk Anim", function(s) Script.S.UnwalkAnim.Toggle(s) end, "Auto Steal", function(s) Script.S.AutoSteal.Toggle(s) end)
-Script.G.ArcadeUILib:AddToggleRow("Anti Debuff", function(s) Script.S.AntiDebuff.Toggle(s) end, "Anti Rdoll", function(s) Script.S.AntiRagdoll.Toggle(s) end)
-Script.G.ArcadeUILib:AddToggleRow("Xray Base", function(s) Script.S.XrayBase.Toggle(s) end, "Fps Boost", function(s) Script.S.FpsBoost.Toggle(s) end)
-Script.G.ArcadeUILib:AddToggleRow("Esp Timer", function(s) Script.S.EspTimer.Toggle(s) end, "", nil)
+-- Gunakan pcall wrapper supaya kalau satu function crash, UI tak rosak
+Script.G.ArcadeUILib:AddToggleRow("Esp Players", function(s) pcall(function() Script.S.EspPlayers.Toggle(s) end) end, "Esp Best", function(s) pcall(function() Script.S.EspBest.Toggle(s) end) end)
+Script.G.ArcadeUILib:AddToggleRow("Base Line", function(s) pcall(function() Script.S.BaseLine.Toggle(s) end) end, "Anti Turret", function(s) pcall(function() Script.S.AntiTurret.Toggle(s) end) end)
+Script.G.ArcadeUILib:AddToggleRow("Aimbot", function(s) pcall(function() Script.S.Aimbot.Toggle(s) end) end, "Kick Steal", function(s) pcall(function() Script.S.KickSteal.Toggle(s) end) end)
+Script.G.ArcadeUILib:AddToggleRow("Unwalk Anim", function(s) pcall(function() Script.S.UnwalkAnim.Toggle(s) end) end, "Auto Steal", function(s) pcall(function() Script.S.AutoSteal.Toggle(s) end) end)
+Script.G.ArcadeUILib:AddToggleRow("Anti Debuff", function(s) pcall(function() Script.S.AntiDebuff.Toggle(s) end) end, "Anti Rdoll", function(s) pcall(function() Script.S.AntiRagdoll.Toggle(s) end) end)
+Script.G.ArcadeUILib:AddToggleRow("Xray Base", function(s) pcall(function() Script.S.XrayBase.Toggle(s) end) end, "Fps Boost", function(s) pcall(function() Script.S.FpsBoost.Toggle(s) end) end)
+Script.G.ArcadeUILib:AddToggleRow("Esp Timer", function(s) pcall(function() Script.S.EspTimer.Toggle(s) end) end, "", nil)
 
-print("🎮 Full Modular Code Loaded (G. & S. Pattern) - FIXED")
+print("🎮 Safe Modular Code Loaded")
 
--- ==================== EXTERNAL LOADER (PROTECTED) ====================
 pcall(function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Sabstealtoolsv1.lua"))()
 end)
