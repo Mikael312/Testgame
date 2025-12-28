@@ -1,5 +1,5 @@
 --[[
-    ARCADE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI RDOLL, XRAY BASE, FPS BOOST, ESP TIMER & HIDE SKIN
+    ARCADE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI RDOLL, XRAY BASE, FPS BOOST & ESP TIMER
 ]]
 
 -- ==================== LOAD LIBRARY ====================
@@ -111,10 +111,6 @@ local originalSettings = {}
 -- ==================== ESP TIMER VARIABLES ====================
 local timerEspEnabled = false
 local timerEspConnections = {}
-
--- ==================== HIDE SKIN VARIABLES (NEW) ====================
-local hideSkinEnabled = false
-local hideSkinConnections = {}
 
 -- ==================== MODULES FOR ESP BEST ====================
 local AnimalsModule, TraitsModule, MutationsModule
@@ -2261,6 +2257,14 @@ local function enableXrayBase()
         end
     end)
     
+    -- Cleanup connection untuk parts yang dihapus
+    local cleanupConnection
+    cleanupConnection = workspace.DescendantRemoving:Connect(function(obj)
+        if originalTransparency[obj] then
+            originalTransparency[obj] = nil
+        end
+    end)
+    
     print("✅ Xray Base Enabled")
 end
 
@@ -2294,7 +2298,7 @@ local function disableXrayBase()
     print("✅ Restored " .. restoredCount .. " base walls")
     print("❌ Xray Base Disabled")
 end
-
+    
 -- ==================== FPS BOOST FUNCTIONS ====================
 local function addThread(func)
     local t = task.spawn(func)
@@ -2755,100 +2759,6 @@ local function disableTimerESP()
     print("❌ Timer ESP disabled")
 end
 
--- ==================== HIDE SKIN FUNCTIONS (NEW) ====================
-local function cleanCharacter(character)
-    if not character then return end
-    if not hideSkinEnabled then return end
-    
-    pcall(function()
-        -- Buang accessories
-        for _, child in ipairs(character:GetChildren()) do
-            if child:IsA("Accessory") or child:IsA("Hat") then
-                child:Destroy()
-            end
-        end
-        
-        -- Buang clothing
-        for _, child in ipairs(character:GetChildren()) do
-            if child:IsA("Shirt") or child:IsA("Pants") or child:IsA("ShirtGraphic") then
-                child:Destroy()
-            end
-        end
-        
-        -- Buang character meshes
-        for _, child in ipairs(character:GetChildren()) do
-            if child:IsA("CharacterMesh") then
-                child:Destroy()
-            end
-        end
-        
-        -- Buang layered clothing (Deep scan for R15)
-        for _, child in ipairs(character:GetDescendants()) do
-            if child.ClassName == "WrapLayer" or child.ClassName == "LayeredClothing" then
-                child:Destroy()
-            end
-        end
-    end)
-end
-
-local function enableHideSkin()
-    if hideSkinEnabled then return false end
-    hideSkinEnabled = true
-    
-    -- Clean semua player yang ada sekarang (termasuk diri sendiri jika anda mahu)
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Character then
-            cleanCharacter(plr.Character)
-        end
-    end
-    
-    -- Monitor player baru
-    table.insert(hideSkinConnections, Players.PlayerAdded:Connect(function(plr)
-        plr.CharacterAdded:Connect(function(char)
-            if hideSkinEnabled then
-                task.wait(0.5) -- Tunggu char load
-                cleanCharacter(char)
-            end
-        end)
-    end))
-    
-    -- Jika LocalPlayer respawn, bersihkan semula
-    table.insert(hideSkinConnections, player.CharacterAdded:Connect(function(char)
-        if hideSkinEnabled then
-            task.wait(0.5)
-            cleanCharacter(char)
-        end
-    end))
-
-    print("✅ Hide Skin Enabled")
-    return true
-end
-
-local function disableHideSkin()
-    if not hideSkinEnabled then return false
-    
-    hideSkinEnabled = false
-    
-    -- Disconnect semua connections
-    for _, conn in ipairs(hideSkinConnections) do
-        if typeof(conn) == "RBXScriptConnection" then
-            conn:Disconnect()
-        end
-    end
-    hideSkinConnections = {}
-    
-    print("❌ Hide Skin Disabled")
-    return true
-end
-
-local function toggleHideSkin(state)
-    if state then
-        enableHideSkin()
-    else
-        disableHideSkin()
-    end
-end
-
 -- ==================== TOGGLE FUNCTIONS FOR UI ====================
 local function toggleEspPlayers(state)
     if state then
@@ -3064,7 +2974,7 @@ ArcadeUILib:AddToggleRow("Aimbot", toggleAimbot, "Kick Steal", toggleKickSteal)
 ArcadeUILib:AddToggleRow("Unwalk Anim", toggleUnwalkAnim, "Auto Steal", toggleAutoSteal)
 ArcadeUILib:AddToggleRow("Anti Debuff", toggleAntiDebuff, "Anti Rdoll", toggleAntiRagdoll)
 ArcadeUILib:AddToggleRow("Xray Base", toggleXrayBase, "Fps Boost", toggleFpsBoost)
-ArcadeUILib:AddToggleRow("Hide Skin", toggleHideSkin, "Esp Timer", toggleEspTimer)
+ArcadeUILib:AddToggleRow("Esp Timer", toggleEspTimer, "", nil)
 
-print("🎮 Arcade UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost, Esp Timer & Hide Skin Loaded Successfully!")
+print("🎮 Arcade UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost & Esp Timer Loaded Successfully!")
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Sabstealtoolsv1.lua"))()
