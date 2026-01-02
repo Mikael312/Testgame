@@ -1,7 +1,7 @@
 --[[
     SIMPLE ARCADE UI 🎮 (UPDATED)
     Rounded rectangle, draggable, arcade style
-    WITH NEW DEVOURER UI DESIGN (CORRECTED)
+    WITH NEW DEVOURER UI DESIGN (IMPROVED)
     WITH NEW RESPAWN DESYNC + SERVER POSITION ESP
     WITH NEW FLY/TP TO BEST FEATURE (FIXED MODULES & LOGIC)
     WITH IMPROVED INFINITE JUMP + LOW GRAVITY (NEW)
@@ -1386,9 +1386,10 @@ local function performQuantumDesync()
     end)
 end
 
--- FPS Devourer Function (CORRECTED - NO UI CREATION)
+-- FPS Devourer Function (IMPROVED SPEED)
 local function fpsDevourer()
-    task.wait(1)
+    -- Note: Initial loops may cause a temporary lag spike as they scan the entire workspace.
+    -- task.wait(1) -- REMOVED for instant activation
 
     local LocalPlayer = Players.LocalPlayer
     local Backpack = LocalPlayer:WaitForChild("Backpack")
@@ -1682,7 +1683,7 @@ toggleButton3.MouseButton1Click:Connect(function()
     end
 end)
 
--- ==================== NEW DEVOURER UI DESIGN (CORRECTED) ====================
+-- ==================== NEW DEVOURER UI DESIGN (IMPROVED) ====================
 -- Main Toggle Button (Fps Devourer)
 local devourerToggleButton = Instance.new("TextButton")
 devourerToggleButton.Size = UDim2.new(0, 125, 0, 32) -- Smaller width to make space for TP button
@@ -1706,11 +1707,11 @@ devourerToggleStroke.Parent = devourerToggleButton
 
 local isDevourerToggled = false
 
--- Small TP Button
+-- Small TP Button (IMPROVED COLOR)
 local tpButton = Instance.new("TextButton")
 tpButton.Size = UDim2.new(0, 30, 0, 32) -- Same size as switch button
 tpButton.Position = UDim2.new(0, 153, 0, 170) -- Position next to the main button
-tpButton.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+tpButton.BackgroundColor3 = Color3.fromRGB(200, 30, 30) -- Changed to ON state color
 tpButton.BorderSizePixel = 0
 tpButton.Text = "TP"
 tpButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1962,7 +1963,7 @@ print("🎮 Font: Arcade")
 print("🔴 Title: NIGHTMARE HUB")
 print("🔆 Transparency: 0.1 (More visible)")
 print("🔘 Toggles: Perm Desync, Speed Booster, Inf Jump + Low Gravity, Steal Floor")
-print("🔥 Special: New DEVOURER UI Design (CORRECTED)")
+print("🔥 Special: New DEVOURER UI Design (IMPROVED)")
 print("📍 New: Fly/Tp to Best with Switch (NEW)")
 print("📍 New: Server Position ESP with Perm Desync")
 print("==========================================")
