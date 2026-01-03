@@ -74,18 +74,12 @@ local unwalkAnimEnabled = false
 local unwalkAnimConnections = {}
 
 -- ==================== AUTO STEAL VARIABLES (NEW) ====================
+local autoStealEnabled = false
 local allAnimalsCache = {}
 local PromptMemoryCache = {}
 local InternalStealCache = {}
 local stealConnection = nil
 local AUTO_STEAL_PROX_RADIUS = 35
-
--- UI elements for steal progress bar
-local screenGui = nil
-local mainFrame = nil
-local barBackground = nil
-local fillBar = nil
-local isAnimating = false
 
 -- ==================== ANTI DEBUFF VARIABLES ====================
 local antiBeeEnabled = false
@@ -143,65 +137,7 @@ pcall(function()
     NumberUtils = require(Utils:WaitForChild("NumberUtils"))
 end)
 
--- ==================== AUTO STEAL UI FUNCTIONS ====================
-local function createStealUI()
-    if screenGui then return end
-    
-    screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "StealBar"
-    screenGui.ResetOnSpawn = false
-    screenGui.Parent = player:WaitForChild("PlayerGui")
-
-    mainFrame = Instance.new("Frame")
-    mainFrame.Size = UDim2.new(0, 300, 0, 30)
-    mainFrame.Position = UDim2.new(0.5, -145, 1, -380)
-    mainFrame.Active = true
-    mainFrame.Draggable = true
-    mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    mainFrame.BorderSizePixel = 2
-    mainFrame.BorderColor3 = Color3.fromRGB(80, 80, 80)
-    mainFrame.BackgroundTransparency = 0.4
-    mainFrame.Parent = screenGui
-
-    barBackground = Instance.new("Frame")
-    barBackground.Size = UDim2.new(1, -8, 1, -8)
-    barBackground.Position = UDim2.new(0, 4, 0, 4)
-    barBackground.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
-    barBackground.Parent = mainFrame
-
-    fillBar = Instance.new("Frame")
-    fillBar.Size = UDim2.new(0, 0, 1, 0)
-    fillBar.BackgroundColor3 = Color3.new(1, 1, 1)
-    fillBar.BorderSizePixel = 0
-    fillBar.Parent = barBackground
-end
-
-local function removeStealUI()
-    if screenGui then
-        screenGui:Destroy()
-        screenGui = nil
-        mainFrame = nil
-        barBackground = nil
-        fillBar = nil
-    end
-end
-
-local function animateFill()
-    if isAnimating then return end 
-    isAnimating = true
-
-    local tweenInfo = TweenInfo.new(1.5, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(fillBar, tweenInfo, {Size = UDim2.new(1, 0, 1, 0)})
-    tween:Play()
-    tween.Completed:Wait()
-
-    task.wait(0.235)
-
-    fillBar.Size = UDim2.new(0, 0, 1, 0)
-    isAnimating = false
-end
-
--- Hook debug.info to bypass synchronizer protection
+-- ==================== BYPASS FOR INSTANT GRAB ====================
 do
     local oldInfo
     oldInfo = hookfunction(debug.info, function(...)
@@ -1655,8 +1591,6 @@ local function findProximityPromptForAnimal(animalData)
 end
 
 local function getAnimalPosition(animalData)
-    if not animalData or not animalData.plot or not animalData.slot then return nil end
-    
     local plot = workspace.Plots:FindFirstChild(animalData.plot)
     if not plot then return nil end
     
@@ -1669,13 +1603,33 @@ local function getAnimalPosition(animalData)
     return podium:GetPivot().Position
 end
 
-local function getBestStealableAnimal()
-    for _, animal in ipairs(allAnimalsCache) do
-        if not isMyBaseAnimal(animal) then
-            return animal
+local function getNearestAnimal()
+    local character = player.Character
+    if not character then return nil end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("UpperTorso")
+    if not hrp then return nil end
+    
+    local nearest = nil
+    local minDist = math.huge
+    
+    for _, animalData in ipairs(allAnimalsCache) do
+        if isMyBaseAnimal(animalData) then
+            continue
+        end
+        
+        local pos = getAnimalPosition(animalData)
+        if pos then
+            local dist = (hrp.Position - pos).Magnitude
+            
+            if dist < minDist then
+                minDist = dist
+                nearest = animalData
+            end
         end
     end
-    return nil
+    
+    return nearest
 end
 
 local function buildStealCallbacks(prompt)
@@ -1782,11 +1736,18 @@ local function scanAllPlots()
                 local animalInfo = AnimalsData[animalName]
                 if not animalInfo then continue end
                 
+                local rarity = animalInfo.Rarity
+                local mutation = animalData.Mutation or "None"
+                local traits = (animalData.Traits and #animalData.Traits > 0) and table.concat(animalData.Traits, ", ") or "None"
+                
                 local genValue = AnimalsShared:GetGeneration(animalName, animalData.Mutation, animalData.Traits, nil)
                 
                 table.insert(newCache, {
                     name = animalInfo.DisplayName or animalName,
                     genValue = genValue,
+                    mutation = mutation,
+                    traits = traits,
+                    owner = ownerName,
                     plot = plot.Name,
                     slot = tostring(slot),
                     uid = plot.Name .. "_" .. tostring(slot),
@@ -1806,13 +1767,12 @@ end
 
 local function startAutoSteal()
     if stealConnection then return end
-
+    
     stealConnection = RunService.Heartbeat:Connect(function()
-        local targetAnimal = getBestStealableAnimal()
+        if not autoStealEnabled then return end
         
-        if not targetAnimal then
-            return
-        end
+        local targetAnimal = getNearestAnimal()
+        if not targetAnimal then return end
         
         local character = player.Character
         if not character then return end
@@ -1824,24 +1784,22 @@ local function startAutoSteal()
         if not animalPos then return end
         
         local dist = (hrp.Position - animalPos).Magnitude
+        if dist > AUTO_STEAL_PROX_RADIUS then return end
         
-        if dist <= AUTO_STEAL_PROX_RADIUS then
-            task.spawn(animateFill)
-            
-            local prompt = PromptMemoryCache[targetAnimal.uid]
-            if not prompt or not prompt.Parent then
-                prompt = findProximityPromptForAnimal(targetAnimal)
-            end
-            
-            if prompt then
-                attemptSteal(prompt)
-            end
+        local prompt = PromptMemoryCache[targetAnimal.uid]
+        if not prompt or not prompt.Parent then
+            prompt = findProximityPromptForAnimal(targetAnimal)
+        end
+        
+        if prompt then
+            attemptSteal(prompt)
         end
     end)
 end
 
 local function stopAutoSteal()
     if not stealConnection then return end
+    
     stealConnection:Disconnect()
     stealConnection = nil
 end
@@ -1850,9 +1808,8 @@ local function enableAutoSteal()
     if autoStealEnabled then return end
     autoStealEnabled = true
     
-    createStealUI()
     startAutoSteal()
-    print("✅ Auto Steal Enabled")
+    print("✅ Nearest Steal Enabled")
 end
 
 local function disableAutoSteal()
@@ -1860,8 +1817,7 @@ local function disableAutoSteal()
     autoStealEnabled = false
     
     stopAutoSteal()
-    removeStealUI()
-    print("❌ Auto Steal Disabled")
+    print("❌ Nearest Steal Disabled")
 end
 
 -- ==================== ANTI DEBUFF FUNCTIONS ====================
@@ -3025,14 +2981,14 @@ Nightmare:CreateUI()
 -- Notifikasi apabila UI dimuatkan
 Nightmare:Notify("Nightmare Hub")
 
--- Tambah toggle dalam baris yang sama (dengan teks "Highest")
-Nightmare:AddToggleRow("Esp Players", toggleEspPlayers, "Highest", toggleEspBest)
+-- Tambah toggle dalam baris yang sama
+Nightmare:AddToggleRow("Esp Players", toggleEspPlayers, "Esp Best", toggleEspBest)
 Nightmare:AddToggleRow("Base Line", toggleBaseLine, "Anti Turret", toggleAntiTurret)
 Nightmare:AddToggleRow("Aimbot", toggleAimbot, "Kick Steal", toggleKickSteal)
-Nightmare:AddToggleRow("Unwalk Anim", toggleUnwalkAnim, "Auto Steal", toggleAutoSteal)
+Nightmare:AddToggleRow("Unwalk Anim", toggleUnwalkAnim, "Nearest", toggleAutoSteal) -- Changed from "Auto Steal" to "Nearest"
 Nightmare:AddToggleRow("Anti Debuff", toggleAntiDebuff, "Anti Rdoll", toggleAntiRagdoll)
 Nightmare:AddToggleRow("Xray Base", toggleXrayBase, "Fps Boost", toggleFpsBoost)
 Nightmare:AddToggleRow("Esp Timer", toggleEspTimer, "", nil)
 
-print("🎮 Nightmare UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost & Esp Timer Loaded Successfully!")
+print("🎮 Nightmare UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Nearest, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost & Esp Timer Loaded Successfully!")
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Sabstealtoolsv1.lua"))()
