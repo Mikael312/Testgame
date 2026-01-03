@@ -1,14 +1,14 @@
 --[[
-    ARCADE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI RDOLL, XRAY BASE, FPS BOOST & ESP TIMER
+    NIGHTMARE UI - INTEGRASI ESP PLAYERS, ESP BEST, BASE LINE, ANTI TURRET, AIMBOT, KICK STEAL, UNWALK ANIM, AUTO STEAL, ANTI DEBUFF, ANTI RDOLL, XRAY BASE, FPS BOOST & ESP TIMER
 ]]
 
 -- ==================== LOAD LIBRARY ====================
-local success, ArcadeUILib = pcall(function()
-    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/Nightmare-Ui/refs/heads/main/ArcadeUiLib.lua"))()
+local success, Nightmare = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/Nightmare-Ui/refs/heads/main/Nightmare.lua"))()
 end)
 
 if not success then
-    warn("❌ Failed to load ArcadeUI library!")
+    warn("❌ Failed to load Nightmare library!")
     return
 end
 
@@ -552,7 +552,7 @@ local function createHighestValueESP(brainrotData)
             -- Hanya beri notifikasi jika ini adalah haiwan yang berbeza dari yang terakhir diberitahu
             if not lastNotifiedPet or lastNotifiedPet ~= petName .. genValue then
                 lastNotifiedPet = petName .. genValue
-                ArcadeUILib:Notify(petName .. " " .. genValue)
+                Nightmare:Notify(petName .. " " .. genValue)
             end
         end
     end)
@@ -2962,19 +2962,19 @@ task.spawn(function()
 end)
 
 -- ==================== CREATE UI AND ADD TOGGLES ====================
-ArcadeUILib:CreateUI()
+Nightmare:CreateUI()
 
 -- Notifikasi apabila UI dimuatkan
-ArcadeUILib:Notify("Nightmare Hub")
+Nightmare:Notify("Nightmare Hub")
 
 -- Tambah toggle dalam baris yang sama
-ArcadeUILib:AddToggleRow("Esp Players", toggleEspPlayers, "Esp Best", toggleEspBest)
-ArcadeUILib:AddToggleRow("Base Line", toggleBaseLine, "Anti Turret", toggleAntiTurret)
-ArcadeUILib:AddToggleRow("Aimbot", toggleAimbot, "Kick Steal", toggleKickSteal)
-ArcadeUILib:AddToggleRow("Unwalk Anim", toggleUnwalkAnim, "Auto Steal", toggleAutoSteal)
-ArcadeUILib:AddToggleRow("Anti Debuff", toggleAntiDebuff, "Anti Rdoll", toggleAntiRagdoll)
-ArcadeUILib:AddToggleRow("Xray Base", toggleXrayBase, "Fps Boost", toggleFpsBoost)
-ArcadeUILib:AddToggleRow("Esp Timer", toggleEspTimer, "", nil)
+Nightmare:AddToggleRow("Esp Players", toggleEspPlayers, "Esp Best", toggleEspBest)
+Nightmare:AddToggleRow("Base Line", toggleBaseLine, "Anti Turret", toggleAntiTurret)
+Nightmare:AddToggleRow("Aimbot", toggleAimbot, "Kick Steal", toggleKickSteal)
+Nightmare:AddToggleRow("Unwalk Anim", toggleUnwalkAnim, "Auto Steal", toggleAutoSteal)
+Nightmare:AddToggleRow("Anti Debuff", toggleAntiDebuff, "Anti Rdoll", toggleAntiRagdoll)
+Nightmare:AddToggleRow("Xray Base", toggleXrayBase, "Fps Boost", toggleFpsBoost)
+Nightmare:AddToggleRow("Esp Timer", toggleEspTimer, "", nil)
 
-print("🎮 Arcade UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost & Esp Timer Loaded Successfully!")
+print("🎮 Nightmare UI with ESP, Base Line, Anti Turret, Aimbot, Kick Steal, Unwalk Anim, Auto Steal, Anti Debuff, Anti Rdoll, Xray Base, Fps Boost & Esp Timer Loaded Successfully!")
 loadstring(game:HttpGet("https://raw.githubusercontent.com/Mikael312/StealBrainrot/refs/heads/main/Sabstealtoolsv1.lua"))()
